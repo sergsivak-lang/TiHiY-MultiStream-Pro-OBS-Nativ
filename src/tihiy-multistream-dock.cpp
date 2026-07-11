@@ -9,6 +9,11 @@
 #include <QSettings>
 #include <QDialogButtonBox>
 #include <QSizePolicy>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QProcess>
 
 #include <obs-module.h>
 
@@ -36,9 +41,10 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     title->setAlignment(Qt::AlignCenter);
     main->addWidget(title);
 
-    youtubeDialog_ = makeTargetDialog("YouTube 2K60", youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160);
-    twitchDialog_ = makeTargetDialog("Twitch 1080p60", twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160);
-    customDialog_ = makeTargetDialog("Custom RTMP", custom_, "", 1920, 1080, 60, 8000, 160);
+    youtubeDialog_ = makeTargetDialog("YouTube 2K60", youtube_, "rtmps://a.rtmps.youtube.com/live2", "https://studio.youtube.com/", 2560, 1440, 60, 24000, 160);
+    twitchDialog_ = makeTargetDialog("Twitch 1080p60", twitch_, "rtmp://live.twitch.tv/app", "https://www.twitch.tv/popout/tihiy_ded/chat?popout=", 1920, 1080, 60, 6000, 160);
+    customDialog_ = makeTargetDialog("Custom RTMP", custom_, "", "", 1920, 1080, 60, 8000, 160);
+    rutonyDialog_ = makeRutonyDialog();
 
     auto *startStopGrid = new QGridLayout();
     auto *startAllButton = makeBigButton("Start All");
@@ -57,18 +63,30 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     customSettingsButton_ = makeBigButton("Custom");
     saveSettingsButton_ = makeBigButton("Save settings");
     applyRecommendedButton_ = makeBigButton("Recommended settings");
+    openChatsButton_ = makeBigButton("Open chats");
+    rutonySettingsButton_ = makeBigButton("Rutony Chat");
+    startRutonyButton_ = makeBigButton("Start Rutony");
+    stopRutonyButton_ = makeBigButton("Stop Rutony");
 
     youtubeSettingsButton_->setToolTip("Open YouTube stream settings.");
     twitchSettingsButton_->setToolTip("Open Twitch stream settings.");
     customSettingsButton_->setToolTip("Open custom RTMP settings.");
     saveSettingsButton_->setToolTip("Save servers, stream keys, bitrate and enabled flags.");
     applyRecommendedButton_->setToolTip("Apply YouTube 2K60 + Twitch 1080p60 recommended preset.");
+    openChatsButton_->setToolTip("Open chat windows for enabled platforms without starting outputs.");
+    rutonySettingsButton_->setToolTip("Open RutonyChat launch settings.");
+    startRutonyButton_->setToolTip("Start RutonyChat manually.");
+    stopRutonyButton_->setToolTip("Stop RutonyChat process started by this plugin.");
 
     platformGrid->addWidget(youtubeSettingsButton_, 0, 0);
     platformGrid->addWidget(twitchSettingsButton_, 0, 1);
     platformGrid->addWidget(customSettingsButton_, 0, 2);
     platformGrid->addWidget(saveSettingsButton_, 1, 0);
-    platformGrid->addWidget(applyRecommendedButton_, 1, 1, 1, 2);
+    platformGrid->addWidget(applyRecommendedButton_, 1, 1);
+    platformGrid->addWidget(openChatsButton_, 1, 2);
+    platformGrid->addWidget(rutonySettingsButton_, 2, 0);
+    platformGrid->addWidget(startRutonyButton_, 2, 1);
+    platformGrid->addWidget(stopRutonyButton_, 2, 2);
     platformGrid->setColumnStretch(0, 1);
     platformGrid->setColumnStretch(1, 1);
     platformGrid->setColumnStretch(2, 1);
@@ -97,6 +115,9 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     connect(youtube_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopYouTube);
     connect(twitch_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopTwitch);
     connect(custom_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopCustom);
+    connect(youtube_.openChat, &QPushButton::clicked, this, &TihiyMultistreamDock::openYouTubeChat);
+    connect(twitch_.openChat, &QPushButton::clicked, this, &TihiyMultistreamDock::openTwitchChat);
+    connect(custom_.openChat, &QPushButton::clicked, this, &TihiyMultistreamDock::openCustomChat);
     connect(startAllButton, &QPushButton::clicked, this, &TihiyMultistreamDock::startAll);
     connect(stopAllButton, &QPushButton::clicked, this, &TihiyMultistreamDock::stopAll);
 
@@ -105,13 +126,22 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     connect(youtubeSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openYouTubeSettings);
     connect(twitchSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openTwitchSettings);
     connect(customSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openCustomSettings);
+    connect(openChatsButton_, &QPushButton::clicked, this, [this]() {
+        openChatForTarget("YouTube", youtube_, true);
+        openChatForTarget("Twitch", twitch_, true);
+        openChatForTarget("Custom", custom_, true);
+    });
+    connect(rutonySettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openRutonySettings);
+    connect(startRutonyButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::startRutonyManual);
+    connect(stopRutonyButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::stopRutony);
 
     loadSettings();
-    appendLog("Compact scalable panel ready. Open a platform to edit settings.");
+    appendLog("Compact panel ready. Streams, chats and RutonyChat launcher are available.");
 }
 
 TihiyMultistreamDock::~TihiyMultistreamDock()
 {
+    stopRutony();
     stopAll();
     releaseTarget(youtubeOut_);
     releaseTarget(twitchOut_);
@@ -119,7 +149,8 @@ TihiyMultistreamDock::~TihiyMultistreamDock()
 }
 
 QDialog *TihiyMultistreamDock::makeTargetDialog(const QString &title, TihiyTargetUi &ui,
-                                                const QString &server, int width, int height, int fps,
+                                                const QString &server, const QString &defaultChatUrl,
+                                                int width, int height, int fps,
                                                 int vbr, int abr)
 {
     auto *dialog = new QDialog(this);
@@ -144,6 +175,11 @@ QDialog *TihiyMultistreamDock::makeTargetDialog(const QString &title, TihiyTarge
     ui.key->setEchoMode(QLineEdit::Password);
     ui.key->setPlaceholderText("Stream key");
 
+    ui.autoOpenChat = new QCheckBox("Open chat after start");
+    ui.autoOpenChat->setChecked(title != "Custom RTMP");
+    ui.chatUrl = new QLineEdit(defaultChatUrl);
+    ui.chatUrl->setPlaceholderText("Chat URL / popout chat URL");
+
     ui.width = new QSpinBox(); ui.width->setRange(320, 7680); ui.width->setValue(width);
     ui.height = new QSpinBox(); ui.height->setRange(240, 4320); ui.height->setValue(height);
     ui.fps = new QSpinBox(); ui.fps->setRange(24, 120); ui.fps->setValue(fps);
@@ -153,6 +189,8 @@ QDialog *TihiyMultistreamDock::makeTargetDialog(const QString &title, TihiyTarge
     layout->addRow(ui.enabled);
     layout->addRow("Server", ui.server);
     layout->addRow("Stream key", ui.key);
+    layout->addRow(ui.autoOpenChat);
+    layout->addRow("Chat URL", ui.chatUrl);
     layout->addRow("Width", ui.width);
     layout->addRow("Height", ui.height);
     layout->addRow("FPS", ui.fps);
@@ -163,9 +201,66 @@ QDialog *TihiyMultistreamDock::makeTargetDialog(const QString &title, TihiyTarge
     auto *rowButtons = new QHBoxLayout();
     ui.start = makeBigButton("Start");
     ui.stop = makeBigButton("Stop");
+    ui.openChat = makeBigButton("Open chat");
     rowButtons->addWidget(ui.start);
     rowButtons->addWidget(ui.stop);
+    rowButtons->addWidget(ui.openChat);
     outer->addLayout(rowButtons);
+
+    auto *closeButtons = new QDialogButtonBox(QDialogButtonBox::Close);
+    connect(closeButtons, &QDialogButtonBox::rejected, dialog, &QDialog::hide);
+    outer->addWidget(closeButtons);
+
+    return dialog;
+}
+
+
+QDialog *TihiyMultistreamDock::makeRutonyDialog()
+{
+    auto *dialog = new QDialog(this);
+    dialog->setWindowTitle("RutonyChat launcher settings");
+    dialog->setMinimumWidth(520);
+
+    auto *outer = new QVBoxLayout(dialog);
+    outer->setContentsMargins(10, 10, 10, 10);
+    outer->setSpacing(8);
+
+    auto *label = new QLabel("<b>RutonyChat</b><br/>Launch RutonyChat together with your stream.");
+    label->setWordWrap(true);
+    outer->addWidget(label);
+
+    rutonyAutoStart_ = new QCheckBox("Start RutonyChat after stream start");
+    rutonyAutoStart_->setChecked(false);
+    outer->addWidget(rutonyAutoStart_);
+
+    auto *pathRow = new QHBoxLayout();
+    rutonyPath_ = new QLineEdit();
+    rutonyPath_->setPlaceholderText("Path to RutonyChat.exe");
+    auto *browse = makeBigButton("Browse...");
+    pathRow->addWidget(rutonyPath_, 1);
+    pathRow->addWidget(browse);
+    outer->addLayout(pathRow);
+
+    rutonyArgs_ = new QLineEdit();
+    rutonyArgs_->setPlaceholderText("Optional launch arguments");
+    auto *form = new QFormLayout();
+    form->addRow("Arguments", rutonyArgs_);
+    outer->addLayout(form);
+
+    auto *buttons = new QHBoxLayout();
+    auto *start = makeBigButton("Start RutonyChat");
+    auto *stop = makeBigButton("Stop RutonyChat");
+    buttons->addWidget(start);
+    buttons->addWidget(stop);
+    outer->addLayout(buttons);
+
+    connect(browse, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(this, "Select RutonyChat.exe", QString(), "Programs (*.exe);;All files (*.*)");
+        if (!path.isEmpty())
+            rutonyPath_->setText(path);
+    });
+    connect(start, &QPushButton::clicked, this, &TihiyMultistreamDock::startRutonyManual);
+    connect(stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopRutony);
 
     auto *closeButtons = new QDialogButtonBox(QDialogButtonBox::Close);
     connect(closeButtons, &QDialogButtonBox::rejected, dialog, &QDialog::hide);
@@ -186,6 +281,10 @@ void TihiyMultistreamDock::showTargetDialog(QDialog *dialog)
 void TihiyMultistreamDock::openYouTubeSettings() { showTargetDialog(youtubeDialog_); }
 void TihiyMultistreamDock::openTwitchSettings() { showTargetDialog(twitchDialog_); }
 void TihiyMultistreamDock::openCustomSettings() { showTargetDialog(customDialog_); }
+void TihiyMultistreamDock::openRutonySettings() { showTargetDialog(rutonyDialog_); }
+void TihiyMultistreamDock::openYouTubeChat() { openChatForTarget("YouTube", youtube_, true); }
+void TihiyMultistreamDock::openTwitchChat() { openChatForTarget("Twitch", twitch_, true); }
+void TihiyMultistreamDock::openCustomChat() { openChatForTarget("Custom", custom_, true); }
 
 void TihiyMultistreamDock::appendLog(const QString &message)
 {
@@ -193,6 +292,101 @@ void TihiyMultistreamDock::appendLog(const QString &message)
     if (log_)
         log_->append(line);
     blog(LOG_INFO, "[TiHiY MultiStream Pro] %s", line.toUtf8().constData());
+}
+
+
+void TihiyMultistreamDock::startRutonyManual()
+{
+    launchRutony(true);
+}
+
+void TihiyMultistreamDock::launchRutony(bool manual)
+{
+    if (!manual && rutonyAutoStart_ && !rutonyAutoStart_->isChecked())
+        return;
+
+    if (rutonyProcess_ && rutonyProcess_->state() != QProcess::NotRunning) {
+        if (manual)
+            appendLog("RutonyChat: already running from plugin.");
+        return;
+    }
+
+    const QString path = rutonyPath_ ? rutonyPath_->text().trimmed() : QString();
+    if (path.isEmpty()) {
+        if (manual)
+            appendLog("RutonyChat: path is empty. Open Rutony Chat settings and select RutonyChat.exe.");
+        return;
+    }
+
+    QFileInfo info(path);
+    if (!info.exists() || !info.isFile()) {
+        appendLog("RutonyChat: executable not found: " + path);
+        return;
+    }
+
+    if (rutonyProcess_) {
+        rutonyProcess_->deleteLater();
+        rutonyProcess_ = nullptr;
+    }
+
+    rutonyProcess_ = new QProcess(this);
+    rutonyProcess_->setProgram(path);
+    if (rutonyArgs_ && !rutonyArgs_->text().trimmed().isEmpty())
+        rutonyProcess_->setArguments(QProcess::splitCommand(rutonyArgs_->text().trimmed()));
+    rutonyProcess_->setWorkingDirectory(info.absolutePath());
+
+    connect(rutonyProcess_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+        if (rutonyProcess_)
+            appendLog("RutonyChat: process error: " + rutonyProcess_->errorString());
+    });
+    connect(rutonyProcess_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this](int code, QProcess::ExitStatus) {
+                appendLog("RutonyChat: process finished, code " + QString::number(code));
+            });
+
+    rutonyProcess_->start();
+    if (rutonyProcess_->waitForStarted(3000))
+        appendLog("RutonyChat: started.");
+    else
+        appendLog("RutonyChat: failed to start: " + rutonyProcess_->errorString());
+}
+
+void TihiyMultistreamDock::stopRutony()
+{
+    if (!rutonyProcess_ || rutonyProcess_->state() == QProcess::NotRunning)
+        return;
+
+    rutonyProcess_->terminate();
+    if (!rutonyProcess_->waitForFinished(2000))
+        rutonyProcess_->kill();
+    appendLog("RutonyChat: stop requested.");
+}
+
+void TihiyMultistreamDock::openChatForTarget(const QString &name, TihiyTargetUi &ui, bool manual)
+{
+    if (!ui.enabled->isChecked() && !manual)
+        return;
+
+    if (!ui.chatUrl)
+        return;
+
+    const QString urlText = ui.chatUrl->text().trimmed();
+    if (urlText.isEmpty()) {
+        if (manual)
+            appendLog(name + ": chat URL is empty. Paste the popout chat URL in platform settings.");
+        return;
+    }
+
+    const QUrl url = QUrl::fromUserInput(urlText);
+    if (!url.isValid()) {
+        appendLog(name + ": chat URL is not valid.");
+        return;
+    }
+
+    if (QDesktopServices::openUrl(url))
+        appendLog(name + ": chat window opened.");
+    else
+        appendLog(name + ": failed to open chat window.");
 }
 
 bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle)
@@ -272,6 +466,12 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
 
     appendLog(name + ": started " + QString::number(ui.width->value()) + "x" + QString::number(ui.height->value()) +
               " @ " + QString::number(ui.videoBitrate->value()) + " Kbps");
+
+    if (ui.autoOpenChat && ui.autoOpenChat->isChecked())
+        openChatForTarget(name, ui, false);
+
+    launchRutony(false);
+
     return true;
 }
 
@@ -309,8 +509,15 @@ void TihiyMultistreamDock::applyRecommendedSettings()
     custom_.enabled->setChecked(false);
     setTargetValues(youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160);
     setTargetValues(twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160);
+    if (youtube_.autoOpenChat) youtube_.autoOpenChat->setChecked(true);
+    if (twitch_.autoOpenChat) twitch_.autoOpenChat->setChecked(true);
+    if (custom_.autoOpenChat) custom_.autoOpenChat->setChecked(false);
+    if (youtube_.chatUrl && youtube_.chatUrl->text().trimmed().isEmpty()) youtube_.chatUrl->setText("https://studio.youtube.com/");
+    if (twitch_.chatUrl && twitch_.chatUrl->text().trimmed().isEmpty()) twitch_.chatUrl->setText("https://www.twitch.tv/popout/tihiy_ded/chat?popout=");
     if (twitchSafeCpu_)
         twitchSafeCpu_->setChecked(true);
+    if (rutonyAutoStart_)
+        rutonyAutoStart_->setChecked(true);
     appendLog("Recommended preset applied: YouTube 2K60 + Twitch 1080p60 safe mode.");
 }
 
@@ -332,12 +539,17 @@ void TihiyMultistreamDock::saveSettings()
         s.setValue(prefix + "/fps", ui.fps->value());
         s.setValue(prefix + "/vbr", ui.videoBitrate->value());
         s.setValue(prefix + "/abr", ui.audioBitrate->value());
+        if (ui.autoOpenChat) s.setValue(prefix + "/autoOpenChat", ui.autoOpenChat->isChecked());
+        if (ui.chatUrl) s.setValue(prefix + "/chatUrl", ui.chatUrl->text());
     };
     saveTarget("youtube", youtube_);
     saveTarget("twitch", twitch_);
     saveTarget("custom", custom_);
     if (twitchSafeCpu_)
         s.setValue("twitchSafeCpu", twitchSafeCpu_->isChecked());
+    if (rutonyAutoStart_) s.setValue("rutony/autoStart", rutonyAutoStart_->isChecked());
+    if (rutonyPath_) s.setValue("rutony/path", rutonyPath_->text());
+    if (rutonyArgs_) s.setValue("rutony/args", rutonyArgs_->text());
 }
 
 void TihiyMultistreamDock::loadSettings()
@@ -352,12 +564,17 @@ void TihiyMultistreamDock::loadSettings()
         ui.fps->setValue(s.value(prefix + "/fps", ui.fps->value()).toInt());
         ui.videoBitrate->setValue(s.value(prefix + "/vbr", ui.videoBitrate->value()).toInt());
         ui.audioBitrate->setValue(s.value(prefix + "/abr", ui.audioBitrate->value()).toInt());
+        if (ui.autoOpenChat) ui.autoOpenChat->setChecked(s.value(prefix + "/autoOpenChat", ui.autoOpenChat->isChecked()).toBool());
+        if (ui.chatUrl) ui.chatUrl->setText(s.value(prefix + "/chatUrl", ui.chatUrl->text()).toString());
     };
     loadTarget("youtube", youtube_);
     loadTarget("twitch", twitch_);
     loadTarget("custom", custom_);
     if (twitchSafeCpu_)
         twitchSafeCpu_->setChecked(s.value("twitchSafeCpu", true).toBool());
+    if (rutonyAutoStart_) rutonyAutoStart_->setChecked(s.value("rutony/autoStart", false).toBool());
+    if (rutonyPath_) rutonyPath_->setText(s.value("rutony/path", "").toString());
+    if (rutonyArgs_) rutonyArgs_->setText(s.value("rutony/args", "").toString());
 }
 
 void TihiyMultistreamDock::startYouTube() { startTarget("YouTube", youtube_, youtubeOut_); }
@@ -382,6 +599,8 @@ void TihiyMultistreamDock::startAll()
 
     if (!startedAny)
         appendLog("Start All: no enabled output started. Check Enabled flags, server and stream keys.");
+    else
+        launchRutony(false);
 }
 
 void TihiyMultistreamDock::stopYouTube() { stopTarget("YouTube", youtubeOut_); }

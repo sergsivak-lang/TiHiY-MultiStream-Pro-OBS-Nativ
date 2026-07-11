@@ -8,6 +8,7 @@
 #include <QTextEdit>
 #include <QDialog>
 #include <QString>
+#include <QProcess>
 
 #include <obs.hpp>
 
@@ -22,6 +23,9 @@ struct TihiyTargetUi {
     QSpinBox *audioBitrate = nullptr;
     QPushButton *start = nullptr;
     QPushButton *stop = nullptr;
+    QCheckBox *autoOpenChat = nullptr;
+    QLineEdit *chatUrl = nullptr;
+    QPushButton *openChat = nullptr;
 };
 
 struct TihiyOutputHandle {
@@ -51,6 +55,12 @@ private slots:
     void openYouTubeSettings();
     void openTwitchSettings();
     void openCustomSettings();
+    void openRutonySettings();
+    void startRutonyManual();
+    void stopRutony();
+    void openYouTubeChat();
+    void openTwitchChat();
+    void openCustomChat();
 
 private:
     TihiyTargetUi youtube_;
@@ -68,16 +78,30 @@ private:
     QPushButton *youtubeSettingsButton_ = nullptr;
     QPushButton *twitchSettingsButton_ = nullptr;
     QPushButton *customSettingsButton_ = nullptr;
+    QPushButton *openChatsButton_ = nullptr;
+    QPushButton *rutonySettingsButton_ = nullptr;
+    QPushButton *startRutonyButton_ = nullptr;
+    QPushButton *stopRutonyButton_ = nullptr;
+
+    QLineEdit *rutonyPath_ = nullptr;
+    QLineEdit *rutonyArgs_ = nullptr;
+    QCheckBox *rutonyAutoStart_ = nullptr;
+    QProcess *rutonyProcess_ = nullptr;
 
     QDialog *youtubeDialog_ = nullptr;
     QDialog *twitchDialog_ = nullptr;
     QDialog *customDialog_ = nullptr;
+    QDialog *rutonyDialog_ = nullptr;
 
     QDialog *makeTargetDialog(const QString &title, TihiyTargetUi &ui,
-                              const QString &server, int width, int height, int fps,
+                              const QString &server, const QString &defaultChatUrl,
+                              int width, int height, int fps,
                               int vbr, int abr);
+    QDialog *makeRutonyDialog();
 
     void showTargetDialog(QDialog *dialog);
+    void openChatForTarget(const QString &name, TihiyTargetUi &ui, bool manual);
+    void launchRutony(bool manual);
     void appendLog(const QString &message);
     bool startTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle);
     void stopTarget(const QString &name, TihiyOutputHandle &handle);
