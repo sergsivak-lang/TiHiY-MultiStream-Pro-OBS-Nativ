@@ -2,10 +2,13 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QFormLayout>
 #include <QLabel>
 #include <QDateTime>
 #include <QSettings>
+#include <QDialogButtonBox>
+#include <QSizePolicy>
 
 #include <obs-module.h>
 
@@ -15,37 +18,77 @@ static constexpr const char *AUDIO_ENCODER_ID = "ffmpeg_aac";
 static constexpr const char *OUTPUT_ID = "rtmp_output";
 static constexpr const char *SERVICE_ID = "rtmp_common";
 
+static QPushButton *makeBigButton(const QString &text)
+{
+    auto *button = new QPushButton(text);
+    button->setMinimumHeight(30);
+    button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    return button;
+}
+
 TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
 {
     auto *main = new QVBoxLayout(this);
+    main->setContentsMargins(8, 8, 8, 8);
+    main->setSpacing(6);
 
-    auto *title = new QLabel("<b>TiHiY MultiStream Pro — Native OBS Plugin</b>");
+    auto *title = new QLabel("<b>TiHiY MultiStream Pro</b>");
+    title->setAlignment(Qt::AlignCenter);
     main->addWidget(title);
 
-    auto *topButtons = new QHBoxLayout();
-    applyRecommendedButton_ = new QPushButton("Apply recommended 2K YouTube + 1080 Twitch");
-    saveSettingsButton_ = new QPushButton("Save settings");
-    topButtons->addWidget(applyRecommendedButton_);
-    topButtons->addWidget(saveSettingsButton_);
-    main->addLayout(topButtons);
+    youtubeDialog_ = makeTargetDialog("YouTube 2K60", youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160);
+    twitchDialog_ = makeTargetDialog("Twitch 1080p60", twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160);
+    customDialog_ = makeTargetDialog("Custom RTMP", custom_, "", 1920, 1080, 60, 8000, 160);
 
-    twitchSafeCpu_ = new QCheckBox("Twitch safe 1080 fix: use x264 fallback when downscaling 2K -> 1080");
+    auto *startStopGrid = new QGridLayout();
+    auto *startAllButton = makeBigButton("Start All");
+    auto *stopAllButton = makeBigButton("Stop All");
+    startAllButton->setToolTip("Start enabled outputs in order: YouTube, Twitch, Custom.");
+    stopAllButton->setToolTip("Stop all active outputs.");
+    startStopGrid->addWidget(startAllButton, 0, 0);
+    startStopGrid->addWidget(stopAllButton, 0, 1);
+    startStopGrid->setColumnStretch(0, 1);
+    startStopGrid->setColumnStretch(1, 1);
+    main->addLayout(startStopGrid);
+
+    auto *platformGrid = new QGridLayout();
+    youtubeSettingsButton_ = makeBigButton("YouTube");
+    twitchSettingsButton_ = makeBigButton("Twitch");
+    customSettingsButton_ = makeBigButton("Custom");
+    saveSettingsButton_ = makeBigButton("Save settings");
+    applyRecommendedButton_ = makeBigButton("Recommended settings");
+
+    youtubeSettingsButton_->setToolTip("Open YouTube stream settings.");
+    twitchSettingsButton_->setToolTip("Open Twitch stream settings.");
+    customSettingsButton_->setToolTip("Open custom RTMP settings.");
+    saveSettingsButton_->setToolTip("Save servers, stream keys, bitrate and enabled flags.");
+    applyRecommendedButton_->setToolTip("Apply YouTube 2K60 + Twitch 1080p60 recommended preset.");
+
+    platformGrid->addWidget(youtubeSettingsButton_, 0, 0);
+    platformGrid->addWidget(twitchSettingsButton_, 0, 1);
+    platformGrid->addWidget(customSettingsButton_, 0, 2);
+    platformGrid->addWidget(saveSettingsButton_, 1, 0);
+    platformGrid->addWidget(applyRecommendedButton_, 1, 1, 1, 2);
+    platformGrid->setColumnStretch(0, 1);
+    platformGrid->setColumnStretch(1, 1);
+    platformGrid->setColumnStretch(2, 1);
+    main->addLayout(platformGrid);
+
+    twitchSafeCpu_ = new QCheckBox("Twitch safe 1080 fix");
+    twitchSafeCpu_->setToolTip("Stable Twitch 1080p mode when OBS canvas is 2560x1440.");
     twitchSafeCpu_->setChecked(true);
     main->addWidget(twitchSafeCpu_);
 
-    main->addWidget(makeTargetBox("YouTube 2K60", youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160));
-    main->addWidget(makeTargetBox("Twitch 1080p60", twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160));
-    main->addWidget(makeTargetBox("Custom RTMP", custom_, "", 1920, 1080, 60, 8000, 160));
-
-    auto *buttons = new QHBoxLayout();
-    auto *stopAllButton = new QPushButton("Stop All");
-    buttons->addWidget(stopAllButton);
-    buttons->addStretch();
-    main->addLayout(buttons);
+    auto *hint = new QLabel("Click YouTube / Twitch / Custom to open platform settings.");
+    hint->setWordWrap(true);
+    hint->setAlignment(Qt::AlignCenter);
+    main->addWidget(hint);
 
     log_ = new QTextEdit();
     log_->setReadOnly(true);
-    log_->setMinimumHeight(120);
+    log_->setMinimumHeight(70);
+    log_->setMaximumHeight(110);
+    log_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     main->addWidget(log_);
 
     connect(youtube_.start, &QPushButton::clicked, this, &TihiyMultistreamDock::startYouTube);
@@ -54,13 +97,17 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     connect(youtube_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopYouTube);
     connect(twitch_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopTwitch);
     connect(custom_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopCustom);
+    connect(startAllButton, &QPushButton::clicked, this, &TihiyMultistreamDock::startAll);
     connect(stopAllButton, &QPushButton::clicked, this, &TihiyMultistreamDock::stopAll);
 
     connect(applyRecommendedButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::applyRecommendedSettings);
     connect(saveSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::saveSettingsClicked);
+    connect(youtubeSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openYouTubeSettings);
+    connect(twitchSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openTwitchSettings);
+    connect(customSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openCustomSettings);
 
     loadSettings();
-    appendLog("Plugin UI ready. Twitch safe 1080 fix is ON by default.");
+    appendLog("Compact scalable panel ready. Open a platform to edit settings.");
 }
 
 TihiyMultistreamDock::~TihiyMultistreamDock()
@@ -71,12 +118,23 @@ TihiyMultistreamDock::~TihiyMultistreamDock()
     releaseTarget(customOut_);
 }
 
-QGroupBox *TihiyMultistreamDock::makeTargetBox(const QString &title, TihiyTargetUi &ui,
+QDialog *TihiyMultistreamDock::makeTargetDialog(const QString &title, TihiyTargetUi &ui,
                                                 const QString &server, int width, int height, int fps,
                                                 int vbr, int abr)
 {
-    auto *box = new QGroupBox(title);
-    auto *layout = new QFormLayout(box);
+    auto *dialog = new QDialog(this);
+    dialog->setWindowTitle(title + " settings");
+    dialog->setMinimumWidth(420);
+
+    auto *outer = new QVBoxLayout(dialog);
+    outer->setContentsMargins(10, 10, 10, 10);
+    outer->setSpacing(8);
+
+    auto *label = new QLabel("<b>" + title + "</b>");
+    outer->addWidget(label);
+
+    auto *layout = new QFormLayout();
+    layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     ui.enabled = new QCheckBox("Enabled");
     ui.enabled->setChecked(title != "Custom RTMP");
@@ -84,18 +142,13 @@ QGroupBox *TihiyMultistreamDock::makeTargetBox(const QString &title, TihiyTarget
     ui.server = new QLineEdit(server);
     ui.key = new QLineEdit();
     ui.key->setEchoMode(QLineEdit::Password);
+    ui.key->setPlaceholderText("Stream key");
 
     ui.width = new QSpinBox(); ui.width->setRange(320, 7680); ui.width->setValue(width);
     ui.height = new QSpinBox(); ui.height->setRange(240, 4320); ui.height->setValue(height);
     ui.fps = new QSpinBox(); ui.fps->setRange(24, 120); ui.fps->setValue(fps);
     ui.videoBitrate = new QSpinBox(); ui.videoBitrate->setRange(500, 100000); ui.videoBitrate->setValue(vbr);
     ui.audioBitrate = new QSpinBox(); ui.audioBitrate->setRange(64, 320); ui.audioBitrate->setValue(abr);
-
-    auto *rowButtons = new QHBoxLayout();
-    ui.start = new QPushButton("Start");
-    ui.stop = new QPushButton("Stop");
-    rowButtons->addWidget(ui.start);
-    rowButtons->addWidget(ui.stop);
 
     layout->addRow(ui.enabled);
     layout->addRow("Server", ui.server);
@@ -105,10 +158,34 @@ QGroupBox *TihiyMultistreamDock::makeTargetBox(const QString &title, TihiyTarget
     layout->addRow("FPS", ui.fps);
     layout->addRow("Video bitrate Kbps", ui.videoBitrate);
     layout->addRow("Audio bitrate Kbps", ui.audioBitrate);
-    layout->addRow(rowButtons);
+    outer->addLayout(layout);
 
-    return box;
+    auto *rowButtons = new QHBoxLayout();
+    ui.start = makeBigButton("Start");
+    ui.stop = makeBigButton("Stop");
+    rowButtons->addWidget(ui.start);
+    rowButtons->addWidget(ui.stop);
+    outer->addLayout(rowButtons);
+
+    auto *closeButtons = new QDialogButtonBox(QDialogButtonBox::Close);
+    connect(closeButtons, &QDialogButtonBox::rejected, dialog, &QDialog::hide);
+    outer->addWidget(closeButtons);
+
+    return dialog;
 }
+
+void TihiyMultistreamDock::showTargetDialog(QDialog *dialog)
+{
+    if (!dialog)
+        return;
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
+}
+
+void TihiyMultistreamDock::openYouTubeSettings() { showTargetDialog(youtubeDialog_); }
+void TihiyMultistreamDock::openTwitchSettings() { showTargetDialog(twitchDialog_); }
+void TihiyMultistreamDock::openCustomSettings() { showTargetDialog(customDialog_); }
 
 void TihiyMultistreamDock::appendLog(const QString &message)
 {
@@ -151,8 +228,6 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     obs_data_set_string(vSettings, "profile", "high");
 
     if (twitchSafe) {
-        // Workaround for corrupted Twitch frames when OBS canvas is 2560x1440
-        // and the Twitch encoder is scaled to 1920x1080 via NVENC texture path.
         obs_data_set_string(vSettings, "preset", "veryfast");
         appendLog(name + ": Twitch safe 1080 fix enabled, using x264 fallback for scaled 1080p output.");
     } else {
@@ -182,8 +257,6 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
 
     obs_encoder_set_video(handle.video, obs_get_video());
     obs_encoder_set_audio(handle.audio, obs_get_audio());
-
-    // OBS supports scaled encoder output. FPS is usually global; for your presets both targets are 60 FPS.
     obs_encoder_set_scaled_size(handle.video, ui.width->value(), ui.height->value());
 
     obs_output_set_service(handle.output, handle.service);
@@ -218,7 +291,6 @@ void TihiyMultistreamDock::releaseTarget(TihiyOutputHandle &handle)
     if (handle.audio) { obs_encoder_release(handle.audio); handle.audio = nullptr; }
     if (handle.service) { obs_service_release(handle.service); handle.service = nullptr; }
 }
-
 
 static void setTargetValues(TihiyTargetUi &ui, const QString &server, int width, int height, int fps, int vbr, int abr)
 {
@@ -291,6 +363,27 @@ void TihiyMultistreamDock::loadSettings()
 void TihiyMultistreamDock::startYouTube() { startTarget("YouTube", youtube_, youtubeOut_); }
 void TihiyMultistreamDock::startTwitch() { startTarget("Twitch", twitch_, twitchOut_); }
 void TihiyMultistreamDock::startCustom() { startTarget("Custom", custom_, customOut_); }
+
+void TihiyMultistreamDock::startAll()
+{
+    saveSettings();
+    appendLog("Start All requested. Starting enabled outputs in safe order...");
+
+    bool startedAny = false;
+
+    if (youtube_.enabled->isChecked())
+        startedAny = startTarget("YouTube", youtube_, youtubeOut_) || startedAny;
+
+    if (twitch_.enabled->isChecked())
+        startedAny = startTarget("Twitch", twitch_, twitchOut_) || startedAny;
+
+    if (custom_.enabled->isChecked())
+        startedAny = startTarget("Custom", custom_, customOut_) || startedAny;
+
+    if (!startedAny)
+        appendLog("Start All: no enabled output started. Check Enabled flags, server and stream keys.");
+}
+
 void TihiyMultistreamDock::stopYouTube() { stopTarget("YouTube", youtubeOut_); }
 void TihiyMultistreamDock::stopTwitch() { stopTarget("Twitch", twitchOut_); }
 void TihiyMultistreamDock::stopCustom() { stopTarget("Custom", customOut_); }

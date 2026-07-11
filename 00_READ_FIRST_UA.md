@@ -1,33 +1,30 @@
-# TiHiY MultiStream Pro — важливо перед завантаженням
+# TiHiY MultiStream Pro v1.5 — Compact Scalable Panel
 
-Цей пакет НЕ треба заливати в старий репозиторій, який був створений вручну.
-Старий репозиторій падає на `OBS::libobs`, бо він не має повної системи OBS Plugin Template.
+Що змінилось:
 
-Правильний шлях:
+- панель стала компактною і краще масштабується в OBS dock;
+- зверху тепер поруч кнопки **Start All** і **Stop All**;
+- нижче кнопки **YouTube**, **Twitch**, **Custom**;
+- налаштування платформ більше не займають всю висоту панелі;
+- при натисканні **YouTube / Twitch / Custom** відкривається окреме вікно налаштувань;
+- окремо винесені кнопки **Save settings** і **Recommended settings**;
+- збереження ключів і параметрів залишилось;
+- Twitch Safe 1080 Fix залишився увімкненим за замовчуванням.
 
-1. Створити НОВИЙ репозиторій через офіційний `obsproject/obs-plugintemplate` кнопкою `Use this template`.
-2. У новому template-репозиторії залишити службові файли шаблону.
-3. Завантажити вміст цього overlay-пакета поверх template-репозиторію.
-4. Не створювати вручну `.github/workflows/main.yml`.
-5. Запускати workflow, який уже є в OBS Plugin Template.
+Як оновити:
 
-## Що вже враховано
+1. Розпакуй архів.
+2. У GitHub template-repo натисни **Add file → Upload files**.
+3. Завантаж весь вміст розпакованої папки, не ZIP.
+4. **Commit changes**.
+5. **Actions → дочекайся Windows artifact**.
+6. Закрий OBS.
+7. Заміни `F:\OOBS\obs-studio\obs-plugins\64bit\tihiy-multistream-pro.dll`.
+8. Запусти OBS.
 
-- Твій OBS 32.1.2.
-- Твоя відеокарта NVIDIA RTX 5060 Ti.
-- NVENC H.264 encoder id: `obs_nvenc_h264_tex`.
-- Конфлікт `obs-multi-rtmp` вже треба тримати вимкненим.
-- Потрібна збірка саме native OBS plugin `.dll`, а не Lua script.
-- GitHub Actions має використовувати template build system, а не саморобний workflow.
+Після запуску має бути компактна панель:
 
-## Що НЕ робити
+Start All | Stop All
+YouTube | Twitch | Custom
+Save settings | Recommended settings
 
-- Не створювати порожній `main.yml` вручну.
-- Не заливати цей пакет у старий repo без OBS Plugin Template.
-- Не видаляти папки `.github/actions`, `.github/scripts`, `build-aux`, `cmake`, `CMakePresets.json`, `buildspec.json` із template repo.
-
-
-## v1.3 Twitch Safe Fix
-- Додано Twitch safe 1080 fix: x264 fallback для Twitch 1080p, коли OBS canvas 2560x1440.
-- Додано кнопку Apply recommended 2K YouTube + 1080 Twitch.
-- Додано Save settings для локального збереження серверів/ключів/бітрейтів.

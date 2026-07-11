@@ -1,21 +1,22 @@
-TiHiY MultiStream Pro TEMPLATE OVERLAY v1.3
+# TiHiY MultiStream Pro v1.4 — START ALL + Twitch Safe Fix
 
-Цей пакет враховує попередні помилки GitHub Actions:
-- Visual Studio runner issue
-- Qt6 missing
-- OBS::libobs target missing
+Що нового:
 
-Головне рішення: використовувати не старий repo, а НОВИЙ repo, створений через obsproject/obs-plugintemplate.
+- додано кнопку **Start All** поруч із **Stop All**;
+- Start All запускає всі увімкнені виходи у безпечному порядку: YouTube → Twitch → Custom;
+- перед Start All автоматично зберігаються налаштування/ключі через QSettings;
+- залишено Twitch Safe 1080 Fix із v1.3;
+- пресет: YouTube 2K60 + Twitch 1080p60.
 
-Коротко:
-1. Create new repo from obsproject/obs-plugintemplate.
-2. Upload this overlay into that repo.
-3. Keep template service folders.
-4. Run template Actions.
-5. Download artifact with native OBS plugin.
+Як оновити:
 
+1. Розпакуй архів.
+2. У GitHub template repo натисни **Add file → Upload files**.
+3. Завантаж весь вміст розпакованої папки, не сам ZIP.
+4. Commit changes.
+5. Actions → дочекайся Windows artifact.
+6. Закрий OBS.
+7. Заміни `F:\OOBS\obs-studio\obs-plugins\64bit\tihiy-multistream-pro.dll`.
+8. Запусти OBS.
 
-## v1.3 Twitch Safe Fix
-- Додано Twitch safe 1080 fix: x264 fallback для Twitch 1080p, коли OBS canvas 2560x1440.
-- Додано кнопку Apply recommended 2K YouTube + 1080 Twitch.
-- Додано Save settings для локального збереження серверів/ключів/бітрейтів.
+Рекомендовано: спочатку натисни **Apply recommended 2K YouTube + 1080 Twitch**, встав ключі, натисни **Save settings**, потім тестуй **Start All**.

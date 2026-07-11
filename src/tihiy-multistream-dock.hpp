@@ -6,10 +6,8 @@
 #include <QCheckBox>
 #include <QPushButton>
 #include <QTextEdit>
-#include <QGroupBox>
+#include <QDialog>
 #include <QString>
-#include <QCheckBox>
-#include <QPushButton>
 
 #include <obs.hpp>
 
@@ -43,12 +41,16 @@ private slots:
     void startYouTube();
     void startTwitch();
     void startCustom();
+    void startAll();
     void stopYouTube();
     void stopTwitch();
     void stopCustom();
     void stopAll();
     void applyRecommendedSettings();
     void saveSettingsClicked();
+    void openYouTubeSettings();
+    void openTwitchSettings();
+    void openCustomSettings();
 
 private:
     TihiyTargetUi youtube_;
@@ -63,11 +65,19 @@ private:
     QCheckBox *twitchSafeCpu_ = nullptr;
     QPushButton *applyRecommendedButton_ = nullptr;
     QPushButton *saveSettingsButton_ = nullptr;
+    QPushButton *youtubeSettingsButton_ = nullptr;
+    QPushButton *twitchSettingsButton_ = nullptr;
+    QPushButton *customSettingsButton_ = nullptr;
 
-    QGroupBox *makeTargetBox(const QString &title, TihiyTargetUi &ui,
-                             const QString &server, int width, int height, int fps,
-                             int vbr, int abr);
+    QDialog *youtubeDialog_ = nullptr;
+    QDialog *twitchDialog_ = nullptr;
+    QDialog *customDialog_ = nullptr;
 
+    QDialog *makeTargetDialog(const QString &title, TihiyTargetUi &ui,
+                              const QString &server, int width, int height, int fps,
+                              int vbr, int abr);
+
+    void showTargetDialog(QDialog *dialog);
     void appendLog(const QString &message);
     bool startTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle);
     void stopTarget(const QString &name, TihiyOutputHandle &handle);
