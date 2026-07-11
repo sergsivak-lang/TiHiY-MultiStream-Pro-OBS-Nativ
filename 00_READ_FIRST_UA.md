@@ -25,3 +25,9 @@
 - Не створювати порожній `main.yml` вручну.
 - Не заливати цей пакет у старий repo без OBS Plugin Template.
 - Не видаляти папки `.github/actions`, `.github/scripts`, `build-aux`, `cmake`, `CMakePresets.json`, `buildspec.json` із template repo.
+
+
+## v1.3 Twitch Safe Fix
+- Додано Twitch safe 1080 fix: x264 fallback для Twitch 1080p, коли OBS canvas 2560x1440.
+- Додано кнопку Apply recommended 2K YouTube + 1080 Twitch.
+- Додано Save settings для локального збереження серверів/ключів/бітрейтів.

@@ -5,10 +5,12 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QDateTime>
+#include <QSettings>
 
 #include <obs-module.h>
 
-static constexpr const char *VIDEO_ENCODER_ID = "obs_nvenc_h264_tex";
+static constexpr const char *VIDEO_ENCODER_ID_NVENC = "obs_nvenc_h264_tex";
+static constexpr const char *VIDEO_ENCODER_ID_X264 = "obs_x264";
 static constexpr const char *AUDIO_ENCODER_ID = "ffmpeg_aac";
 static constexpr const char *OUTPUT_ID = "rtmp_output";
 static constexpr const char *SERVICE_ID = "rtmp_common";
@@ -20,7 +22,18 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     auto *title = new QLabel("<b>TiHiY MultiStream Pro — Native OBS Plugin</b>");
     main->addWidget(title);
 
-    main->addWidget(makeTargetBox("YouTube 2K60", youtube_, "rtmp://a.rtmp.youtube.com/live2", 2560, 1440, 60, 24000, 160));
+    auto *topButtons = new QHBoxLayout();
+    applyRecommendedButton_ = new QPushButton("Apply recommended 2K YouTube + 1080 Twitch");
+    saveSettingsButton_ = new QPushButton("Save settings");
+    topButtons->addWidget(applyRecommendedButton_);
+    topButtons->addWidget(saveSettingsButton_);
+    main->addLayout(topButtons);
+
+    twitchSafeCpu_ = new QCheckBox("Twitch safe 1080 fix: use x264 fallback when downscaling 2K -> 1080");
+    twitchSafeCpu_->setChecked(true);
+    main->addWidget(twitchSafeCpu_);
+
+    main->addWidget(makeTargetBox("YouTube 2K60", youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160));
     main->addWidget(makeTargetBox("Twitch 1080p60", twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160));
     main->addWidget(makeTargetBox("Custom RTMP", custom_, "", 1920, 1080, 60, 8000, 160));
 
@@ -43,7 +56,11 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     connect(custom_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopCustom);
     connect(stopAllButton, &QPushButton::clicked, this, &TihiyMultistreamDock::stopAll);
 
-    appendLog("Plugin UI ready. First test one platform only.");
+    connect(applyRecommendedButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::applyRecommendedSettings);
+    connect(saveSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::saveSettingsClicked);
+
+    loadSettings();
+    appendLog("Plugin UI ready. Twitch safe 1080 fix is ON by default.");
 }
 
 TihiyMultistreamDock::~TihiyMultistreamDock()
@@ -124,13 +141,30 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     handle.service = obs_service_create(SERVICE_ID, name.toUtf8().constData(), serviceSettings, nullptr);
     obs_data_release(serviceSettings);
 
+    const bool twitchSafe = (name == "Twitch" && twitchSafeCpu_ && twitchSafeCpu_->isChecked());
+    const char *videoEncoderId = twitchSafe ? VIDEO_ENCODER_ID_X264 : VIDEO_ENCODER_ID_NVENC;
+
     obs_data_t *vSettings = obs_data_create();
     obs_data_set_int(vSettings, "bitrate", ui.videoBitrate->value());
     obs_data_set_string(vSettings, "rate_control", "CBR");
     obs_data_set_int(vSettings, "keyint_sec", 2);
-    obs_data_set_string(vSettings, "preset", "p5");
     obs_data_set_string(vSettings, "profile", "high");
-    handle.video = obs_video_encoder_create(VIDEO_ENCODER_ID, (name + " Video").toUtf8().constData(), vSettings, nullptr);
+
+    if (twitchSafe) {
+        // Workaround for corrupted Twitch frames when OBS canvas is 2560x1440
+        // and the Twitch encoder is scaled to 1920x1080 via NVENC texture path.
+        obs_data_set_string(vSettings, "preset", "veryfast");
+        appendLog(name + ": Twitch safe 1080 fix enabled, using x264 fallback for scaled 1080p output.");
+    } else {
+        obs_data_set_string(vSettings, "preset", "p5");
+        obs_data_set_string(vSettings, "tuning", "hq");
+        obs_data_set_string(vSettings, "multipass", "qres");
+        obs_data_set_bool(vSettings, "lookahead", false);
+        obs_data_set_bool(vSettings, "psycho_aq", true);
+        obs_data_set_int(vSettings, "bframes", 2);
+    }
+
+    handle.video = obs_video_encoder_create(videoEncoderId, (name + " Video").toUtf8().constData(), vSettings, nullptr);
     obs_data_release(vSettings);
 
     obs_data_t *aSettings = obs_data_create();
@@ -183,6 +217,75 @@ void TihiyMultistreamDock::releaseTarget(TihiyOutputHandle &handle)
     if (handle.video) { obs_encoder_release(handle.video); handle.video = nullptr; }
     if (handle.audio) { obs_encoder_release(handle.audio); handle.audio = nullptr; }
     if (handle.service) { obs_service_release(handle.service); handle.service = nullptr; }
+}
+
+
+static void setTargetValues(TihiyTargetUi &ui, const QString &server, int width, int height, int fps, int vbr, int abr)
+{
+    ui.server->setText(server);
+    ui.width->setValue(width);
+    ui.height->setValue(height);
+    ui.fps->setValue(fps);
+    ui.videoBitrate->setValue(vbr);
+    ui.audioBitrate->setValue(abr);
+}
+
+void TihiyMultistreamDock::applyRecommendedSettings()
+{
+    youtube_.enabled->setChecked(true);
+    twitch_.enabled->setChecked(true);
+    custom_.enabled->setChecked(false);
+    setTargetValues(youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160);
+    setTargetValues(twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160);
+    if (twitchSafeCpu_)
+        twitchSafeCpu_->setChecked(true);
+    appendLog("Recommended preset applied: YouTube 2K60 + Twitch 1080p60 safe mode.");
+}
+
+void TihiyMultistreamDock::saveSettingsClicked()
+{
+    saveSettings();
+    appendLog("Settings saved locally. Stream keys are stored in this Windows user profile.");
+}
+
+void TihiyMultistreamDock::saveSettings()
+{
+    QSettings s("TiHiY-DED", "TiHiYMultiStreamPro");
+    auto saveTarget = [&s](const QString &prefix, TihiyTargetUi &ui) {
+        s.setValue(prefix + "/enabled", ui.enabled->isChecked());
+        s.setValue(prefix + "/server", ui.server->text());
+        s.setValue(prefix + "/key", ui.key->text());
+        s.setValue(prefix + "/width", ui.width->value());
+        s.setValue(prefix + "/height", ui.height->value());
+        s.setValue(prefix + "/fps", ui.fps->value());
+        s.setValue(prefix + "/vbr", ui.videoBitrate->value());
+        s.setValue(prefix + "/abr", ui.audioBitrate->value());
+    };
+    saveTarget("youtube", youtube_);
+    saveTarget("twitch", twitch_);
+    saveTarget("custom", custom_);
+    if (twitchSafeCpu_)
+        s.setValue("twitchSafeCpu", twitchSafeCpu_->isChecked());
+}
+
+void TihiyMultistreamDock::loadSettings()
+{
+    QSettings s("TiHiY-DED", "TiHiYMultiStreamPro");
+    auto loadTarget = [&s](const QString &prefix, TihiyTargetUi &ui) {
+        ui.enabled->setChecked(s.value(prefix + "/enabled", ui.enabled->isChecked()).toBool());
+        ui.server->setText(s.value(prefix + "/server", ui.server->text()).toString());
+        ui.key->setText(s.value(prefix + "/key", ui.key->text()).toString());
+        ui.width->setValue(s.value(prefix + "/width", ui.width->value()).toInt());
+        ui.height->setValue(s.value(prefix + "/height", ui.height->value()).toInt());
+        ui.fps->setValue(s.value(prefix + "/fps", ui.fps->value()).toInt());
+        ui.videoBitrate->setValue(s.value(prefix + "/vbr", ui.videoBitrate->value()).toInt());
+        ui.audioBitrate->setValue(s.value(prefix + "/abr", ui.audioBitrate->value()).toInt());
+    };
+    loadTarget("youtube", youtube_);
+    loadTarget("twitch", twitch_);
+    loadTarget("custom", custom_);
+    if (twitchSafeCpu_)
+        twitchSafeCpu_->setChecked(s.value("twitchSafeCpu", true).toBool());
 }
 
 void TihiyMultistreamDock::startYouTube() { startTarget("YouTube", youtube_, youtubeOut_); }

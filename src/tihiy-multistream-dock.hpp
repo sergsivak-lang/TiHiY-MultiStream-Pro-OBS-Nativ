@@ -8,6 +8,8 @@
 #include <QTextEdit>
 #include <QGroupBox>
 #include <QString>
+#include <QCheckBox>
+#include <QPushButton>
 
 #include <obs.hpp>
 
@@ -45,6 +47,8 @@ private slots:
     void stopTwitch();
     void stopCustom();
     void stopAll();
+    void applyRecommendedSettings();
+    void saveSettingsClicked();
 
 private:
     TihiyTargetUi youtube_;
@@ -56,6 +60,9 @@ private:
     TihiyOutputHandle customOut_;
 
     QTextEdit *log_ = nullptr;
+    QCheckBox *twitchSafeCpu_ = nullptr;
+    QPushButton *applyRecommendedButton_ = nullptr;
+    QPushButton *saveSettingsButton_ = nullptr;
 
     QGroupBox *makeTargetBox(const QString &title, TihiyTargetUi &ui,
                              const QString &server, int width, int height, int fps,
@@ -65,4 +72,6 @@ private:
     bool startTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle);
     void stopTarget(const QString &name, TihiyOutputHandle &handle);
     void releaseTarget(TihiyOutputHandle &handle);
+    void loadSettings();
+    void saveSettings();
 };

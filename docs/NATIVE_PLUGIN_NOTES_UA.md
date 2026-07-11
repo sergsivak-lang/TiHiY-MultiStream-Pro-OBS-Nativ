@@ -24,3 +24,9 @@ F:\OOBS\obs-studio\data\obs-plugins\tihiy-multistream-pro\locale\uk-UA.ini
 2. Вставляємо цей код у template.
 3. GitHub Actions збирає `.dll` і installer.
 4. Ти ставиш `.exe` і тестуєш у OBS.
+
+
+## v1.3 Twitch Safe Fix
+- Додано Twitch safe 1080 fix: x264 fallback для Twitch 1080p, коли OBS canvas 2560x1440.
+- Додано кнопку Apply recommended 2K YouTube + 1080 Twitch.
+- Додано Save settings для локального збереження серверів/ключів/бітрейтів.
