@@ -1,5 +1,5 @@
 #define MyAppName "TiHiY MultiStream Pro"
-#define MyAppVersion "2.2.0"
+#define MyAppVersion "2.3.0"
 #define MyAppPublisher "TiHiY-DED"
 #define ObsDir "F:\\OOBS\\obs-studio"
 
@@ -11,7 +11,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={#ObsDir}
 DisableProgramGroupPage=yes
 OutputDir=output
-OutputBaseFilename=TiHiY_MultiStream_Pro_OBS_Plugin_Setup_v2.2
+OutputBaseFilename=TiHiY_MultiStream_Pro_OBS_Plugin_Setup_v2.3
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

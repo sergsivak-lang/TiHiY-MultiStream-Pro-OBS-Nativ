@@ -1,31 +1,47 @@
-# TiHiY MultiStream Pro v2.2 ACTIVE START BUTTONS
+# TiHiY MultiStream Pro v2.3 — INSTALLER AUTO BUILD
 
-Це чиста версія без Rutony і без автовідкриття чатів.
+Це overlay для правильного репозиторію:
 
-Додано головне виправлення:
-- після натискання будь-якої кнопки Start видно стан запуску;
-- Start показує `Starting...`;
-- після успішного старту кнопка стає `LIVE`;
-- у вікні платформи видно статус `READY / STARTING / LIVE / STOPPED / ERROR`;
-- у головній панелі видно `Status: IDLE` або `Status: LIVE — YouTube + Twitch`;
-- `Start All` теж показує активний стан.
+`sergsivak-lang/TiHiY-MultiStream-Pro-OBS-Nativ`
 
-## Правильний порядок
+## Що нового
 
-1. Завантаж весь вміст цієї папки в GitHub repo через **Add file → Upload files**.
-2. Саме в repo: `sergsivak-lang/TiHiY-MultiStream-Pro-OBS-Nativ`.
-3. Натисни **Commit changes**.
-4. Перейди в **Actions** і дочекайся збірки.
-5. Скачай Windows artifact.
-6. Закрий OBS.
-7. Замінити DLL або зібрати інсталятор через:
+- Без Rutony.
+- Без автовідкриття чатів.
+- Є активні статуси кнопок Start / LIVE / FAILED.
+- Додано GitHub Actions workflow, який після успішної збірки DLL автоматично робить `Setup.exe`.
 
-```bat
-tools\MAKE_INSTALLER_FROM_ACTIONS_ARTIFACT.bat
-```
+## Як заливати
 
-Готовий інсталятор буде тут:
+1. Розпакувати архів v2.3.
+2. Відкрити репозиторій `TiHiY-MultiStream-Pro-OBS-Nativ`.
+3. `Add file → Upload files`.
+4. Завантажити весь вміст розпакованої папки, не саму папку і не ZIP.
+5. `Commit changes`.
 
-```text
-installer\output\TiHiY_MultiStream_Pro_OBS_Plugin_Setup_v2.2.exe
-```
+## Що буде в Actions
+
+Після звичайної збірки DLL з’явиться ще один workflow:
+
+`Build TiHiY Installer v2.3`
+
+Він створить artifact:
+
+`TiHiY-MultiStream-Pro-Setup-v2.3`
+
+Усередині буде готовий інсталятор:
+
+`TiHiY_MultiStream_Pro_OBS_Plugin_Setup_v2.3.exe`
+
+## Встановлення
+
+Запустити Setup.exe, шлях OBS за замовчуванням:
+
+`F:\OOBS\obs-studio`
+
+Інсталятор копіює:
+
+- `tihiy-multistream-pro.dll` → `obs-plugins\64bit`
+- `data\locale` → `data\obs-plugins\tihiy-multistream-pro`
+
+Ключі та налаштування OBS не видаляються.

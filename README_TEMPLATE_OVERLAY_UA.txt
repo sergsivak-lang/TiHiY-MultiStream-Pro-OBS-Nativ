@@ -1,13 +1,10 @@
-TiHiY MultiStream Pro v2.2 CLEAN overlay
+TiHiY MultiStream Pro v2.3 INSTALLER AUTO BUILD
 
-Цей overlay завантажується поверх OBS Plugin Template repo.
+Завантажувати у правильний репозиторій:
+sergsivak-lang/TiHiY-MultiStream-Pro-OBS-Nativ
 
-Що робить v2.2:
-- повертає чисту компактну панель;
-- повністю прибирає RutonyChat;
-- прибирає Open chats / Chat URL / Open chat after start;
-- залишає YouTube, Twitch, Custom, Start All, Stop All, Save settings, Recommended settings;
-- залишає Twitch safe 1080 fix;
-- залишає інсталяторні скрипти.
+Завантажити в корінь repo весь вміст цієї папки.
+Не завантажувати ZIP і не завантажувати папку v2.3 як вкладену папку.
 
-Завантажити весь вміст цієї папки в GitHub repo через Add file -> Upload files.
+Після commit:
+Actions -> звичайна збірка DLL -> Build TiHiY Installer v2.3 -> artifact Setup.exe.

@@ -1,43 +1,28 @@
-# TiHiY MultiStream Pro v2.2 ACTIVE START BUTTONS
+# TiHiY MultiStream Pro v2.3
 
-Нативний OBS-плагін для одночасного стріму на YouTube / Twitch / Custom RTMP.
+Native OBS plugin для одночасного стріму на YouTube 2K60 і Twitch 1080p60.
 
-## Головне у v2.2
+## Основне
 
-- RutonyChat прибрано повністю.
-- Автовідкриття чатів при старті прибрано.
-- Панель компактна.
-- Додано видимий стан запуску для всіх Start-кнопок.
-- Після натискання Start кнопка показує `Starting...`, потім `LIVE`.
-- При помилці показує `START FAILED`, `CREATE FAILED` або `MISSING SERVER / KEY`.
-- У кожному вікні YouTube / Twitch / Custom є окремий статус.
-- У головній панелі є загальний статус `IDLE` або `LIVE — YouTube + Twitch`.
+- Start All / Stop All.
+- YouTube / Twitch / Custom окремими вікнами налаштувань.
+- Save settings.
+- Recommended settings.
+- Twitch Safe 1080 Fix.
+- Активні статуси кнопок: Starting, LIVE, Failed.
+- Автоматична збірка `Setup.exe` через GitHub Actions.
 
-## Панель
+## Правильний репозиторій
 
-- Start All
-- Stop All
-- YouTube
-- Twitch
-- Custom
-- Save settings
-- Recommended settings
-- Twitch safe 1080 fix
-- Status: IDLE / LIVE
+`sergsivak-lang/TiHiY-MultiStream-Pro-OBS-Nativ`
 
-## Рекомендовані налаштування
-
-- YouTube: 2560×1440, 60 FPS, 24000 Kbps.
-- Twitch: 1920×1080, 60 FPS, 6000 Kbps.
-- Twitch safe 1080 fix: ON.
+Старий репозиторій `TiHiY-MultiStream-Pro-OBS-Plugin` не використовувати.
 
 ## Інсталятор
 
-Після GitHub Actions можна встановити вручну або зібрати Setup.exe:
+Після commit у GitHub Actions мають бути артефакти:
 
-- `tools/INSTALL_PLUGIN_SIMPLE.bat`
-- `tools/MAKE_INSTALLER_FROM_ACTIONS_ARTIFACT.bat`
+1. Windows build / plugin files.
+2. `TiHiY-MultiStream-Pro-Setup-v2.3`.
 
-За замовчуванням інсталятор орієнтується на OBS у:
-
-`F:\OOBS\obs-studio`
+Скачати другий artifact і запустити `.exe`.
