@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QTextEdit>
 #include <QDialog>
+#include <QLabel>
 #include <QString>
 
 #include <obs.hpp>
@@ -22,6 +23,7 @@ struct TihiyTargetUi {
     QSpinBox *audioBitrate = nullptr;
     QPushButton *start = nullptr;
     QPushButton *stop = nullptr;
+    QLabel *status = nullptr;
 };
 
 struct TihiyOutputHandle {
@@ -63,6 +65,9 @@ private:
 
     QTextEdit *log_ = nullptr;
     QCheckBox *twitchSafeCpu_ = nullptr;
+    QLabel *globalStatus_ = nullptr;
+    QPushButton *startAllButton_ = nullptr;
+    QPushButton *stopAllButton_ = nullptr;
     QPushButton *applyRecommendedButton_ = nullptr;
     QPushButton *saveSettingsButton_ = nullptr;
     QPushButton *youtubeSettingsButton_ = nullptr;
@@ -80,8 +85,10 @@ private:
     void showTargetDialog(QDialog *dialog);
     void appendLog(const QString &message);
     bool startTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle);
-    void stopTarget(const QString &name, TihiyOutputHandle &handle);
+    void stopTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle);
     void releaseTarget(TihiyOutputHandle &handle);
     void loadSettings();
     void saveSettings();
+    void setTargetState(TihiyTargetUi &ui, const QString &stateText, const QString &styleState);
+    void updateGlobalState();
 };

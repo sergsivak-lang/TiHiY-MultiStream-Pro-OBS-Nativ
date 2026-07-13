@@ -1,7 +1,7 @@
 ПЕРЕВІРКА ПЕРЕД UPLOAD:
 
 [ ] Я створив НОВИЙ repo через obsproject/obs-plugintemplate -> Use this template.
-[ ] Я НЕ використовую старий repo TiHiY-MultiStream-Pro-OBS-Plugin, який падав на OBS::libobs.
+[ ] Я НЕ використовую старий repo TiHiY-MultiStream-Pro-OBS-Nativ, який падав на OBS::libobs.
 [ ] У новому repo є службові папки шаблону:
     - .github/actions
     - .github/scripts
@@ -15,4 +15,4 @@
 
 
 ---
-TiHiY MultiStream Pro v2.1 CLEAN: RutonyChat and auto-open chats are removed.
+TiHiY MultiStream Pro v2.2 CLEAN: RutonyChat and auto-open chats are removed.

@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
 
 echo ============================================================
-echo  TiHiY MultiStream Pro v2.1 - Setup.exe builder
+echo  TiHiY MultiStream Pro v2.2 - Setup.exe builder
 echo ============================================================
 echo.
 echo 1) Спочатку скачай Windows artifact з GitHub Actions.
@@ -85,6 +85,6 @@ echo.
 echo ============================================================
 echo  ГОТОВО
 echo  Файл тут:
-echo  %ROOT%\installer\output\TiHiY_MultiStream_Pro_OBS_Plugin_Setup_v2.1.exe
+echo  %ROOT%\installer\output\TiHiY_MultiStream_Pro_OBS_Plugin_Setup_v2.2.exe
 echo ============================================================
 pause

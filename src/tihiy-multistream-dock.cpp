@@ -9,6 +9,7 @@
 #include <QSettings>
 #include <QDialogButtonBox>
 #include <QSizePolicy>
+#include <QStringList>
 
 #include <obs-module.h>
 
@@ -40,13 +41,18 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     twitchDialog_ = makeTargetDialog("Twitch 1080p60", twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160);
     customDialog_ = makeTargetDialog("Custom RTMP", custom_, "", 1920, 1080, 60, 8000, 160);
 
+    globalStatus_ = new QLabel("Status: IDLE");
+    globalStatus_->setAlignment(Qt::AlignCenter);
+    globalStatus_->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px;");
+    main->addWidget(globalStatus_);
+
     auto *startStopGrid = new QGridLayout();
-    auto *startAllButton = makeBigButton("Start All");
-    auto *stopAllButton = makeBigButton("Stop All");
-    startAllButton->setToolTip("Start enabled outputs in order: YouTube, Twitch, Custom.");
-    stopAllButton->setToolTip("Stop all active outputs.");
-    startStopGrid->addWidget(startAllButton, 0, 0);
-    startStopGrid->addWidget(stopAllButton, 0, 1);
+    startAllButton_ = makeBigButton("Start All");
+    stopAllButton_ = makeBigButton("Stop All");
+    startAllButton_->setToolTip("Start enabled outputs in order: YouTube, Twitch, Custom.");
+    stopAllButton_->setToolTip("Stop all active outputs.");
+    startStopGrid->addWidget(startAllButton_, 0, 0);
+    startStopGrid->addWidget(stopAllButton_, 0, 1);
     startStopGrid->setColumnStretch(0, 1);
     startStopGrid->setColumnStretch(1, 1);
     main->addLayout(startStopGrid);
@@ -97,8 +103,8 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     connect(youtube_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopYouTube);
     connect(twitch_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopTwitch);
     connect(custom_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopCustom);
-    connect(startAllButton, &QPushButton::clicked, this, &TihiyMultistreamDock::startAll);
-    connect(stopAllButton, &QPushButton::clicked, this, &TihiyMultistreamDock::stopAll);
+    connect(startAllButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::startAll);
+    connect(stopAllButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::stopAll);
 
     connect(applyRecommendedButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::applyRecommendedSettings);
     connect(saveSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::saveSettingsClicked);
@@ -107,7 +113,11 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     connect(customSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openCustomSettings);
 
     loadSettings();
-    appendLog("Compact scalable panel ready. Open a platform to edit settings.");
+    setTargetState(youtube_, "READY", "idle");
+    setTargetState(twitch_, "READY", "idle");
+    setTargetState(custom_, "READY", "idle");
+    updateGlobalState();
+    appendLog("Compact scalable panel ready. Start buttons now show STARTING / LIVE / STOPPED status.");
 }
 
 TihiyMultistreamDock::~TihiyMultistreamDock()
@@ -160,6 +170,11 @@ QDialog *TihiyMultistreamDock::makeTargetDialog(const QString &title, TihiyTarge
     layout->addRow("Audio bitrate Kbps", ui.audioBitrate);
     outer->addLayout(layout);
 
+    ui.status = new QLabel("READY");
+    ui.status->setAlignment(Qt::AlignCenter);
+    ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px;");
+    outer->addWidget(ui.status);
+
     auto *rowButtons = new QHBoxLayout();
     ui.start = makeBigButton("Start");
     ui.stop = makeBigButton("Stop");
@@ -195,22 +210,95 @@ void TihiyMultistreamDock::appendLog(const QString &message)
     blog(LOG_INFO, "[TiHiY MultiStream Pro] %s", line.toUtf8().constData());
 }
 
+void TihiyMultistreamDock::setTargetState(TihiyTargetUi &ui, const QString &stateText, const QString &styleState)
+{
+    if (!ui.start || !ui.stop || !ui.status)
+        return;
+
+    if (styleState == "starting") {
+        ui.start->setText("Starting...");
+        ui.start->setEnabled(false);
+        ui.stop->setEnabled(true);
+        ui.start->setStyleSheet("font-weight: bold; background-color: #9a6a00; color: white;");
+        ui.status->setText(stateText);
+        ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #9a6a00; color: white;");
+    } else if (styleState == "live") {
+        ui.start->setText("LIVE");
+        ui.start->setEnabled(false);
+        ui.stop->setEnabled(true);
+        ui.start->setStyleSheet("font-weight: bold; background-color: #188038; color: white;");
+        ui.status->setText(stateText);
+        ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #188038; color: white;");
+    } else if (styleState == "error") {
+        ui.start->setText("Start");
+        ui.start->setEnabled(true);
+        ui.stop->setEnabled(false);
+        ui.start->setStyleSheet("font-weight: bold; background-color: #b3261e; color: white;");
+        ui.status->setText(stateText);
+        ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #b3261e; color: white;");
+    } else {
+        ui.start->setText("Start");
+        ui.start->setEnabled(true);
+        ui.stop->setEnabled(false);
+        ui.start->setStyleSheet("");
+        ui.status->setText(stateText);
+        ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px;");
+    }
+}
+
+void TihiyMultistreamDock::updateGlobalState()
+{
+    const bool anyLive = youtubeOut_.output || twitchOut_.output || customOut_.output;
+
+    if (globalStatus_) {
+        if (anyLive) {
+            QStringList live;
+            if (youtubeOut_.output) live << "YouTube";
+            if (twitchOut_.output) live << "Twitch";
+            if (customOut_.output) live << "Custom";
+            globalStatus_->setText("Status: LIVE — " + live.join(" + "));
+            globalStatus_->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #188038; color: white;");
+        } else {
+            globalStatus_->setText("Status: IDLE");
+            globalStatus_->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px;");
+        }
+    }
+
+    if (startAllButton_) {
+        startAllButton_->setText(anyLive ? "LIVE ACTIVE" : "Start All");
+        startAllButton_->setEnabled(!anyLive);
+        startAllButton_->setStyleSheet(anyLive ? "font-weight: bold; background-color: #188038; color: white;" : "");
+    }
+
+    if (stopAllButton_)
+        stopAllButton_->setEnabled(anyLive);
+}
+
 bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle)
 {
     if (!ui.enabled->isChecked()) {
+        setTargetState(ui, "DISABLED", "error");
+        updateGlobalState();
         appendLog(name + ": skipped, not enabled.");
         return false;
     }
 
     if (ui.server->text().trimmed().isEmpty() || ui.key->text().trimmed().isEmpty()) {
+        setTargetState(ui, "MISSING SERVER / KEY", "error");
+        updateGlobalState();
         appendLog(name + ": server/key is empty.");
         return false;
     }
 
     if (handle.output) {
-        appendLog(name + ": already created. Stop first.");
+        setTargetState(ui, "LIVE", "live");
+        updateGlobalState();
+        appendLog(name + ": already active. Stop first.");
         return false;
     }
+
+    setTargetState(ui, "STARTING...", "starting");
+    updateGlobalState();
 
     obs_data_t *serviceSettings = obs_data_create();
     obs_data_set_string(serviceSettings, "server", ui.server->text().toUtf8().constData());
@@ -252,6 +340,8 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     if (!handle.service || !handle.video || !handle.audio || !handle.output) {
         appendLog(name + ": failed to create OBS output/encoder/service.");
         releaseTarget(handle);
+        setTargetState(ui, "CREATE FAILED", "error");
+        updateGlobalState();
         return false;
     }
 
@@ -267,21 +357,29 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
         const char *error = obs_output_get_last_error(handle.output);
         appendLog(name + ": start failed: " + QString(error ? error : "unknown error"));
         releaseTarget(handle);
+        setTargetState(ui, "START FAILED", "error");
+        updateGlobalState();
         return false;
     }
 
+    setTargetState(ui, "LIVE", "live");
+    updateGlobalState();
     appendLog(name + ": started " + QString::number(ui.width->value()) + "x" + QString::number(ui.height->value()) +
               " @ " + QString::number(ui.videoBitrate->value()) + " Kbps");
     return true;
 }
 
-void TihiyMultistreamDock::stopTarget(const QString &name, TihiyOutputHandle &handle)
+void TihiyMultistreamDock::stopTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle)
 {
     if (handle.output) {
         obs_output_stop(handle.output);
         appendLog(name + ": stop requested.");
+    } else {
+        appendLog(name + ": already stopped.");
     }
     releaseTarget(handle);
+    setTargetState(ui, "STOPPED", "idle");
+    updateGlobalState();
 }
 
 void TihiyMultistreamDock::releaseTarget(TihiyOutputHandle &handle)
@@ -367,6 +465,11 @@ void TihiyMultistreamDock::startCustom() { startTarget("Custom", custom_, custom
 void TihiyMultistreamDock::startAll()
 {
     saveSettings();
+    if (startAllButton_) {
+        startAllButton_->setText("STARTING...");
+        startAllButton_->setEnabled(false);
+        startAllButton_->setStyleSheet("font-weight: bold; background-color: #9a6a00; color: white;");
+    }
     appendLog("Start All requested. Starting enabled outputs in safe order...");
 
     bool startedAny = false;
@@ -382,15 +485,17 @@ void TihiyMultistreamDock::startAll()
 
     if (!startedAny)
         appendLog("Start All: no enabled output started. Check Enabled flags, server and stream keys.");
+
+    updateGlobalState();
 }
 
-void TihiyMultistreamDock::stopYouTube() { stopTarget("YouTube", youtubeOut_); }
-void TihiyMultistreamDock::stopTwitch() { stopTarget("Twitch", twitchOut_); }
-void TihiyMultistreamDock::stopCustom() { stopTarget("Custom", customOut_); }
+void TihiyMultistreamDock::stopYouTube() { stopTarget("YouTube", youtube_, youtubeOut_); }
+void TihiyMultistreamDock::stopTwitch() { stopTarget("Twitch", twitch_, twitchOut_); }
+void TihiyMultistreamDock::stopCustom() { stopTarget("Custom", custom_, customOut_); }
 
 void TihiyMultistreamDock::stopAll()
 {
-    stopTarget("YouTube", youtubeOut_);
-    stopTarget("Twitch", twitchOut_);
-    stopTarget("Custom", customOut_);
+    stopTarget("YouTube", youtube_, youtubeOut_);
+    stopTarget("Twitch", twitch_, twitchOut_);
+    stopTarget("Custom", custom_, customOut_);
 }

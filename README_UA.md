@@ -1,16 +1,17 @@
-# TiHiY MultiStream Pro v2.1 CLEAN
+# TiHiY MultiStream Pro v2.2 ACTIVE START BUTTONS
 
 Нативний OBS-плагін для одночасного стріму на YouTube / Twitch / Custom RTMP.
 
-## Головне у v2.1
-
-Це чиста версія після тестів:
+## Головне у v2.2
 
 - RutonyChat прибрано повністю.
 - Автовідкриття чатів при старті прибрано.
-- Кнопки чатів прибрано.
-- Панель знову компактна.
-- Залишені тільки потрібні функції мультістріму.
+- Панель компактна.
+- Додано видимий стан запуску для всіх Start-кнопок.
+- Після натискання Start кнопка показує `Starting...`, потім `LIVE`.
+- При помилці показує `START FAILED`, `CREATE FAILED` або `MISSING SERVER / KEY`.
+- У кожному вікні YouTube / Twitch / Custom є окремий статус.
+- У головній панелі є загальний статус `IDLE` або `LIVE — YouTube + Twitch`.
 
 ## Панель
 
@@ -22,6 +23,7 @@
 - Save settings
 - Recommended settings
 - Twitch safe 1080 fix
+- Status: IDLE / LIVE
 
 ## Рекомендовані налаштування
 
