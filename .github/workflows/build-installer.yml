@@ -1,0 +1,119 @@
+name: Build TiHiY Installer v2.3
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Optional: GitHub Actions build run ID that contains tihiy-multistream-pro.dll"
+        required: false
+        type: string
+  workflow_run:
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  installer:
+    name: Create Setup.exe
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.name != 'Build TiHiY Installer v2.3'
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows build artifact
+        id: download
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          New-Item -ItemType Directory -Force -Path "downloaded_artifacts" | Out-Null
+
+          $runId = ""
+          if ("${{ github.event_name }}" -eq "workflow_run") {
+            $runId = "${{ github.event.workflow_run.id }}"
+          } else {
+            $runId = "${{ github.event.inputs.run_id }}"
+          }
+
+          if (-not $runId) {
+            Write-Host "No run_id provided. Searching latest successful build run with artifacts..."
+            $runs = gh run list --repo "${{ github.repository }}" --status success --limit 30 --json databaseId,name,conclusion,status | ConvertFrom-Json
+            $candidate = $runs | Where-Object { $_.name -ne "Build TiHiY Installer v2.3" } | Select-Object -First 1
+            if ($candidate) { $runId = [string]$candidate.databaseId }
+          }
+
+          if (-not $runId) {
+            Write-Host "::notice::No build run found. Installer packaging skipped."
+            "skip=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          Write-Host "Downloading artifacts from run id: $runId"
+          gh run download $runId --repo "${{ github.repository }}" --dir "downloaded_artifacts"
+
+          $dll = Get-ChildItem -Path "downloaded_artifacts" -Recurse -Filter "tihiy-multistream-pro.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dll) {
+            Write-Host "::notice::No tihiy-multistream-pro.dll found in artifacts from run $runId. Installer packaging skipped."
+            "skip=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          Write-Host "DLL found: $($dll.FullName)"
+          "skip=false" >> $env:GITHUB_OUTPUT
+          "dll=$($dll.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Prepare installer payload
+        if: steps.download.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $payload = "installer\payload"
+          if (Test-Path $payload) { Remove-Item -Recurse -Force $payload }
+          New-Item -ItemType Directory -Force -Path "$payload\obs-plugins\64bit" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$payload\data\obs-plugins\tihiy-multistream-pro" | Out-Null
+
+          Copy-Item -Force "${{ steps.download.outputs.dll }}" "$payload\obs-plugins\64bit\tihiy-multistream-pro.dll"
+
+          if (Test-Path "data") {
+            Copy-Item -Recurse -Force "data\*" "$payload\data\obs-plugins\tihiy-multistream-pro\"
+          }
+
+          Write-Host "Payload ready:"
+          Get-ChildItem -Recurse $payload | Select-Object FullName
+
+      - name: Install Inno Setup
+        if: steps.download.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build Setup.exe
+        if: steps.download.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $possible = @(
+            "${env:ProgramFiles}\Inno Setup 7\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = $possible | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found after Inno Setup install" }
+          Write-Host "Using ISCC: $iscc"
+          & $iscc "installer\TiHiYMultiStreamPro.iss"
+
+      - name: Upload Setup.exe artifact
+        if: steps.download.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-MultiStream-Pro-Setup-v2.3
+          path: installer/output/*.exe
+          if-no-files-found: error
