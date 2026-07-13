@@ -1,12 +1,7 @@
-name: Build TiHiY Installer v2.3
+name: Build TiHiY Installer SAFE
 
 on:
   workflow_dispatch:
-    inputs:
-      run_id:
-        description: "Optional: GitHub Actions run ID with Windows artifact"
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -14,124 +9,33 @@ permissions:
 
 jobs:
   installer:
-    name: Create Setup.exe
+    name: Create SAFE Setup.exe
     runs-on: windows-2022
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Check payload DLL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $dll = "installer\payload\obs-plugins\64bit\tihiy-multistream-pro.dll"
+
+          if (-not (Test-Path $dll)) {
+            throw "DLL not found: $dll"
+          }
+
+          Write-Host "Payload DLL found:"
+          Write-Host $dll
+
       - name: Install Inno Setup
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress
 
-      - name: Download Windows artifact
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Remove-Item "downloaded_artifacts" -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path "downloaded_artifacts" | Out-Null
-
-          $runId = "${{ github.event.inputs.run_id }}"
-
-          if ([string]::IsNullOrWhiteSpace($runId)) {
-            throw "run_id is empty. Open Actions -> Push -> Windows artifact run, copy number after /runs/, then run this workflow with that run_id."
-          }
-
-          Write-Host "Using Push run ID: $runId"
-
-          gh run download $runId `
-            --repo "${{ github.repository }}" `
-            --dir "downloaded_artifacts"
-
-          Write-Host "Downloaded --repo "${{ github.repository }}" `
-            -- artifacts:"
-          Get-ChildItem "downloaded_artifacts" -Recurse | ForEach-Object {
-            Write-Host $_.FullName
-          }
-
-      - name: Extract inner ZIP packages
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $extractRoot = "extracted_artifacts"
-
-          Remove-Item $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
-
-          Copy-Item "downloaded_artifacts\*" $extractRoot -Recurse -Force
-
-          $zips = Get-ChildItem $extractRoot -Recurse -File -Filter "*.zip"
-
-          foreach ($zip in $zips) {
-            $dest = Join-Path $zip.DirectoryName ($zip.BaseName + "_unzipped")
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
-
-            Write-Host "Extracting ZIP:"
-            Write-Host $zip.FullName
-
-            Expand-Archive -Path $zip.FullName -DestinationPath $dest -Force
-          }
-
-          Write-Host "All extracted files:"
-          Get-ChildItem $extractRoot -Recurse | ForEach-Object {
-            Write-Host $_.FullName
-          }
-
-      - name: Find DLL and prepare installer payload
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $payload = "installer\payload"
-
-          Remove-Item $payload -Recurse -Force -ErrorAction SilentlyContinue
-
-          New-Item -ItemType Directory -Force -Path "$payload\obs-plugins\64bit" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$payload\data\obs-plugins\tihiy-multistream-pro" | Out-Null
-
-          Write-Host "Searching for plugin DLL..."
-
-          $allDlls = Get-ChildItem -Path "extracted_artifacts" -Recurse -File -Filter "*.dll"
-
-          Write-Host "DLL files found:"
-          foreach ($file in $allDlls) {
-            Write-Host $file.FullName
-          }
-
-          $dll = $allDlls |
-            Where-Object {
-              $_.Name -ieq "tihiy-multistream-pro.dll" -or
-              $_.Name -ieq "plugintemplate-for-obs.dll" -or
-              $_.Name -like "*multistream*.dll" -or
-              $_.Name -like "*plugintemplate*.dll"
-            } |
-            Select-Object -First 1
-
-          if (-not $dll) {
-            throw "No suitable plugin DLL found after extracting ZIP packages."
-          }
-
-          Write-Host "Selected plugin DLL:"
-          Write-Host $dll.FullName
-
-          Copy-Item $dll.FullName "$payload\obs-plugins\64bit\tihiy-multistream-pro.dll" -Force
-
-          if (Test-Path "data") {
-            Copy-Item "data\*" "$payload\data\obs-plugins\tihiy-multistream-pro" -Recurse -Force
-          }
-
-          Write-Host "Prepared installer payload:"
-          Get-ChildItem $payload -Recurse | ForEach-Object {
-            Write-Host $_.FullName
-          }
-
-      - name: Compile installer with Inno Setup
+      - name: Compile installer
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -168,6 +72,6 @@ jobs:
       - name: Upload Setup.exe artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TiHiY-MultiStream-Pro-Setup-v2.3
+          name: TiHiY-MultiStream-Pro-Setup-SAFE
           path: installer/output/*.exe
           if-no-files-found: error
