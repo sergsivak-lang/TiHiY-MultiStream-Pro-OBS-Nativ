@@ -26,7 +26,7 @@ jobs:
         run: |
           choco install innosetup -y --no-progress
 
-      - name: Download latest Windows artifact
+      - name: Download Windows artifact
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,21 +39,7 @@ jobs:
           $runId = "${{ github.event.inputs.run_id }}"
 
           if ([string]::IsNullOrWhiteSpace($runId)) {
-            Write-Host "No run_id provided. Searching latest Push run, even if failed..."
-
-            $runs = gh run list `
-              --repo "${{ github.repository }}" `
-              --workflow "Push" `
-              --branch "master" `
-              --limit 10 `
-              --json databaseId,conclusion,status `
-              | ConvertFrom-Json
-
-            $runId = ($runs | Where-Object { $_.status -eq "completed" } | Select-Object -First 1).databaseId
-          }
-
-          if ([string]::IsNullOrWhiteSpace($runId)) {
-            throw "Could not find any completed Push workflow run."
+            throw "run_id is empty. Open Actions -> Push -> Windows artifact run, copy number after /runs/, then run this workflow with that run_id."
           }
 
           Write-Host "Using Push run ID: $runId"
@@ -62,8 +48,40 @@ jobs:
             --repo "${{ github.repository }}" `
             --dir "downloaded_artifacts"
 
-          Write-Host "Downloaded artifacts:"
-          Get-ChildItem "downloaded_artifacts" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+          Write-Host "Downloaded --repo "${{ github.repository }}" `
+            -- artifacts:"
+          Get-ChildItem "downloaded_artifacts" -Recurse | ForEach-Object {
+            Write-Host $_.FullName
+          }
+
+      - name: Extract inner ZIP packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $extractRoot = "extracted_artifacts"
+
+          Remove-Item $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+
+          Copy-Item "downloaded_artifacts\*" $extractRoot -Recurse -Force
+
+          $zips = Get-ChildItem $extractRoot -Recurse -File -Filter "*.zip"
+
+          foreach ($zip in $zips) {
+            $dest = Join-Path $zip.DirectoryName ($zip.BaseName + "_unzipped")
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+            Write-Host "Extracting ZIP:"
+            Write-Host $zip.FullName
+
+            Expand-Archive -Path $zip.FullName -DestinationPath $dest -Force
+          }
+
+          Write-Host "All extracted files:"
+          Get-ChildItem $extractRoot -Recurse | ForEach-Object {
+            Write-Host $_.FullName
+          }
 
       - name: Find DLL and prepare installer payload
         shell: pwsh
@@ -77,23 +95,29 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$payload\obs-plugins\64bit" | Out-Null
           New-Item -ItemType Directory -Force -Path "$payload\data\obs-plugins\tihiy-multistream-pro" | Out-Null
 
-          Write-Host "Searching for DLL..."
-          Get-ChildItem "downloaded_artifacts" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+          Write-Host "Searching for plugin DLL..."
 
-          $dll = Get-ChildItem -Path "downloaded_artifacts" -Recurse -File |
+          $allDlls = Get-ChildItem -Path "extracted_artifacts" -Recurse -File -Filter "*.dll"
+
+          Write-Host "DLL files found:"
+          foreach ($file in $allDlls) {
+            Write-Host $file.FullName
+          }
+
+          $dll = $allDlls |
             Where-Object {
               $_.Name -ieq "tihiy-multistream-pro.dll" -or
               $_.Name -ieq "plugintemplate-for-obs.dll" -or
-              $_.Name -like "*plugintemplate*.dll" -or
-              $_.Name -like "*multistream*.dll"
+              $_.Name -like "*multistream*.dll" -or
+              $_.Name -like "*plugintemplate*.dll"
             } |
             Select-Object -First 1
 
           if (-not $dll) {
-            throw "No suitable plugin DLL found. Checked for tihiy-multistream-pro.dll and plugintemplate-for-obs.dll."
+            throw "No suitable plugin DLL found after extracting ZIP packages."
           }
 
-          Write-Host "Found DLL:"
+          Write-Host "Selected plugin DLL:"
           Write-Host $dll.FullName
 
           Copy-Item $dll.FullName "$payload\obs-plugins\64bit\tihiy-multistream-pro.dll" -Force
@@ -103,7 +127,9 @@ jobs:
           }
 
           Write-Host "Prepared installer payload:"
-          Get-ChildItem $payload -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+          Get-ChildItem $payload -Recurse | ForEach-Object {
+            Write-Host $_.FullName
+          }
 
       - name: Compile installer with Inno Setup
         shell: pwsh
