@@ -1,48 +1,30 @@
-# TiHiY MultiStream Pro v1.7 — Compact Scalable Panel
+# TiHiY MultiStream Pro v2.1 CLEAN INSTALLER FIXED
 
-Що змінилось:
+Це чиста версія без Rutony і без автовідкриття чатів.
 
-- панель стала компактною і краще масштабується в OBS dock;
-- зверху тепер поруч кнопки **Start All** і **Stop All**;
-- нижче кнопки **YouTube**, **Twitch**, **Custom**;
-- налаштування платформ більше не займають всю висоту панелі;
-- при натисканні **YouTube / Twitch / Custom** відкривається окреме вікно налаштувань;
-- окремо винесені кнопки **Save settings** і **Recommended settings**;
-- збереження ключів і параметрів залишилось;
-- Twitch Safe 1080 Fix залишився увімкненим за замовчуванням.
+Виправлено інсталятор:
+- більше НЕ шукає `build\Release\tihiy-multistream-pro.dll`;
+- спочатку бере DLL з розпакованого GitHub Actions artifact;
+- сам складає `installer\payload`;
+- після цього збирає нормальний Setup.exe.
 
-Як оновити:
+## Правильний порядок
 
-1. Розпакуй архів.
-2. У GitHub template-repo натисни **Add file → Upload files**.
-3. Завантаж весь вміст розпакованої папки, не ZIP.
-4. **Commit changes**.
-5. **Actions → дочекайся Windows artifact**.
-6. Закрий OBS.
-7. Заміни `F:\OOBS\obs-studio\obs-plugins\64bit\tihiy-multistream-pro.dll`.
-8. Запусти OBS.
+1. Завантаж весь вміст цієї папки в GitHub repo через **Add file → Upload files**.
+2. Натисни **Commit changes**.
+3. Перейди в **Actions** і дочекайся збірки.
+4. Скачай Windows artifact.
+5. Розпакуй artifact у папку з проєктом або в будь-яку підпапку.
+6. Запусти:
 
-Після запуску має бути компактна панель:
+```bat
+tools\MAKE_INSTALLER_FROM_ACTIONS_ARTIFACT.bat
+```
 
-Start All | Stop All
-YouTube | Twitch | Custom
-Save settings | Recommended settings
+Готовий файл буде тут:
 
+```text
+installer\output\TiHiY_MultiStream_Pro_OBS_Plugin_Setup_v2.1.exe
+```
 
-
-## v1.7 AUTO OPEN CHATS
-
-- Додано автоматичне відкриття чатів після старту YouTube/Twitch/Custom.
-- У вікнах YouTube/Twitch/Custom зʼявились поля `Chat URL` і `Open chat after start`.
-- На головній компактній панелі додано кнопку `Open chats`.
-- Twitch за замовчуванням має popout-chat URL для `tihiy_ded`; YouTube за замовчуванням відкриває YouTube Studio, а точний popout chat URL можна вставити вручну.
-- Stream keys і Chat URLs зберігаються через `Save settings`.
-
-
-## v1.7 RutonyChat Launcher
-- Додано кнопку Rutony Chat у компактну панель.
-- Можна вибрати шлях до RutonyChat.exe.
-- Можна запускати RutonyChat вручну або автоматично після старту трансляції.
-- Додано Start Rutony / Stop Rutony.
-
-Майбутній етап: TiHiY Chat — власний аналог RutonyChat для Twitch + YouTube з ботом та імпортом налаштувань Rutony.
+Не компілюй `.iss` вручну до того, як artifact розпакований і payload створений батником.
