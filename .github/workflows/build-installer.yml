@@ -81,11 +81,16 @@ jobs:
           Get-ChildItem "downloaded_artifacts" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
 
           $dll = Get-ChildItem -Path "downloaded_artifacts" -Recurse -File |
-            Where-Object { $_.Name -ieq "tihiy-multistream-pro.dll" } |
+            Where-Object {
+              $_.Name -ieq "tihiy-multistream-pro.dll" -or
+              $_.Name -ieq "plugintemplate-for-obs.dll" -or
+              $_.Name -like "*plugintemplate*.dll" -or
+              $_.Name -like "*multistream*.dll"
+            } |
             Select-Object -First 1
 
           if (-not $dll) {
-            throw "tihiy-multistream-pro.dll not found. Open the Push artifact and check the DLL name."
+            throw "No suitable plugin DLL found. Checked for tihiy-multistream-pro.dll and plugintemplate-for-obs.dll."
           }
 
           Write-Host "Found DLL:"
@@ -128,6 +133,9 @@ jobs:
           if (-not (Test-Path "installer\TiHiYMultiStreamPro.iss")) {
             throw "installer\TiHiYMultiStreamPro.iss not found."
           }
+
+          Write-Host "Using Inno Setup:"
+          Write-Host $iscc
 
           & $iscc "installer\TiHiYMultiStreamPro.iss"
 
