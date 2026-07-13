@@ -8,7 +8,8 @@ on:
         required: false
         type: string
   workflow_run:
-    types: [completed]
+  workflows: ["Push"]
+  types: [completed]
 
 permissions:
   contents: read
