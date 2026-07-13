@@ -4,13 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: "Optional: GitHub Actions run ID that contains tihiy-multistream-pro.dll"
+        description: "Optional: GitHub Actions run ID with Windows artifact"
         required: false
         type: string
-
-  workflow_run:
-    workflows: ["Push"]
-    types: [completed]
 
 permissions:
   contents: read
@@ -21,8 +17,6 @@ jobs:
     name: Create Setup.exe
     runs-on: windows-2022
 
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,42 +26,37 @@ jobs:
         run: |
           choco install innosetup -y --no-progress
 
-      - name: Download Windows build artifact
+      - name: Download latest Windows artifact
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
 
+          Remove-Item "downloaded_artifacts" -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path "downloaded_artifacts" | Out-Null
 
-          $runId = ""
-
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $runId = "${{ github.event.inputs.run_id }}"
-          }
-
-          if ("${{ github.event_name }}" -eq "workflow_run") {
-            $runId = "${{ github.event.workflow_run.id }}"
-          }
+          $runId = "${{ github.event.inputs.run_id }}"
 
           if ([string]::IsNullOrWhiteSpace($runId)) {
-            Write-Host "No run_id provided. Searching latest successful Push run..."
-            $runId = gh run list `
+            Write-Host "No run_id provided. Searching latest Push run, even if failed..."
+
+            $runs = gh run list `
               --repo "${{ github.repository }}" `
               --workflow "Push" `
               --branch "master" `
-              --status success `
-              --limit 1 `
-              --json databaseId `
-              --jq '.[0].databaseId'
+              --limit 10 `
+              --json databaseId,conclusion,status `
+              | ConvertFrom-Json
+
+            $runId = ($runs | Where-Object { $_.status -eq "completed" } | Select-Object -First 1).databaseId
           }
 
           if ([string]::IsNullOrWhiteSpace($runId)) {
-            throw "Could not find a successful Push workflow run."
+            throw "Could not find any completed Push workflow run."
           }
 
-          Write-Host "Using build run ID: $runId"
+          Write-Host "Using Push run ID: $runId"
 
           gh run download $runId `
             --repo "${{ github.repository }}" `
@@ -76,7 +65,7 @@ jobs:
           Write-Host "Downloaded artifacts:"
           Get-ChildItem "downloaded_artifacts" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
 
-      - name: Prepare installer payload
+      - name: Find DLL and prepare installer payload
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -88,10 +77,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$payload\obs-plugins\64bit" | Out-Null
           New-Item -ItemType Directory -Force -Path "$payload\data\obs-plugins\tihiy-multistream-pro" | Out-Null
 
-          $dll = Get-ChildItem -Path "downloaded_artifacts" -Recurse -Filter "tihiy-multistream-pro.dll" | Select-Object -First 1
+          Write-Host "Searching for DLL..."
+          Get-ChildItem "downloaded_artifacts" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+
+          $dll = Get-ChildItem -Path "downloaded_artifacts" -Recurse -File |
+            Where-Object { $_.Name -ieq "tihiy-multistream-pro.dll" } |
+            Select-Object -First 1
 
           if (-not $dll) {
-            throw "tihiy-multistream-pro.dll not found in downloaded artifacts."
+            throw "tihiy-multistream-pro.dll not found. Open the Push artifact and check the DLL name."
           }
 
           Write-Host "Found DLL:"
@@ -128,15 +122,12 @@ jobs:
           }
 
           if (-not $iscc) {
-            throw "ISCC.exe not found. Inno Setup installation failed."
+            throw "ISCC.exe not found."
           }
 
           if (-not (Test-Path "installer\TiHiYMultiStreamPro.iss")) {
             throw "installer\TiHiYMultiStreamPro.iss not found."
           }
-
-          Write-Host "Using Inno Setup:"
-          Write-Host $iscc
 
           & $iscc "installer\TiHiYMultiStreamPro.iss"
 
