@@ -1,0 +1,2 @@
+Run the fixed full-motion Star Citizen promo renderer.
+Retry after silent-source audio fix.
