@@ -9,12 +9,21 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
+      - name: Report render run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "FULL MOTION PROMO RUN $GITHUB_RUN_ID" \
+            --body "Real moving-video render started. Run ID: $GITHUB_RUN_ID"
+
       - uses: actions/checkout@v4
 
       - name: Install tools and font
