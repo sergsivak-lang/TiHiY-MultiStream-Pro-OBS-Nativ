@@ -36,23 +36,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg curl gawk
-          sudo curl -fL --retry 5 --retry-delay 2 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp' -o /usr/local/bin/yt-dlp
-          sudo chmod +x /usr/local/bin/yt-dlp
           mkdir -p work/fonts output
           curl -fL --retry 4 --retry-delay 2 'https://github.com/google/fonts/raw/main/ofl/orbitron/Orbitron%5Bwght%5D.ttf' -o work/fonts/Orbitron.ttf
           curl -fL --retry 4 --retry-delay 2 'https://github.com/google/fonts/raw/main/ofl/exo2/Exo2%5Bwght%5D.ttf' -o work/fonts/Exo2.ttf
-          yt-dlp --version
 
-      - name: Download the three official video sources
+      - name: Download official RSI CDN videos
         shell: bash
         run: |
           set -euo pipefail
           cd work
-          yt-dlp --no-playlist --retries 5 --fragment-retries 5 --concurrent-fragments 4 --merge-output-format mp4 -f 'bv*[height<=1440]+ba/b[height<=1440]' -o tactical.mp4 'https://www.youtube.com/watch?v=RWQSxN-ZukE'
-          yt-dlp --no-playlist --retries 5 --fragment-retries 5 --concurrent-fragments 4 --merge-output-format mp4 -f 'bv*[height<=1440]+ba/b[height<=1440]' -o defensecon.mp4 'https://www.youtube.com/watch?v=BqPLaDMnUUs'
+          curl -fL --retry 5 --retry-delay 3 'https://media.robertsspaceindustries.com/in35u0wsdl5ys/source.mp4' -o tactical_main.mp4
+          curl -fL --retry 5 --retry-delay 3 'https://media.robertsspaceindustries.com/9vuck22dgycnl/source.mp4' -o tactical_alt.mp4
+          curl -fL --retry 5 --retry-delay 3 'https://media.robertsspaceindustries.com/ek2roy7yuiw58/source.mp4' -o defensecon.mp4
           curl -fL --retry 5 --retry-delay 3 'https://media.robertsspaceindustries.com/4tsoif8ccdaiq/source.mp4' -o foundation.mp4
-          for F in tactical.mp4 defensecon.mp4 foundation.mp4; do
-            ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of json "$F"
+          for F in tactical_main.mp4 tactical_alt.mp4 defensecon.mp4 foundation.mp4; do
+            ffprobe -v error -show_entries format=duration,size:stream=codec_name,codec_type,width,height -of json "$F"
           done
 
       - name: Cut ten real moving scenes
@@ -71,23 +69,36 @@ jobs:
             ffmpeg -y -hide_banner -loglevel error -ss "$START" -i "$SRC" -t 4.1 -vf "scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.07:saturation=1.10:brightness=-0.008:gamma=0.99,unsharp=5:5:0.34,trim=duration=3.8,setpts=PTS-STARTPTS" -an -c:v libx264 -preset veryfast -crf 17 -profile:v high -pix_fmt yuv420p "$OUT"
           }
 
-          make_clip tactical.mp4 0.12 clip0.mp4
-          make_clip defensecon.mp4 0.18 clip1.mp4
-          make_clip tactical.mp4 0.29 clip2.mp4
-          make_clip foundation.mp4 0.23 clip3.mp4
-          make_clip defensecon.mp4 0.46 clip4.mp4
-          make_clip tactical.mp4 0.47 clip5.mp4
-          make_clip defensecon.mp4 0.72 clip6.mp4
-          make_clip foundation.mp4 0.64 clip7.mp4
-          make_clip tactical.mp4 0.67 clip8.mp4
-          make_clip tactical.mp4 0.83 clip9.mp4
+          make_clip tactical_main.mp4 0.10 clip0.mp4
+          make_clip defensecon.mp4 0.16 clip1.mp4
+          make_clip tactical_alt.mp4 0.26 clip2.mp4
+          make_clip foundation.mp4 0.22 clip3.mp4
+          make_clip defensecon.mp4 0.43 clip4.mp4
+          make_clip tactical_main.mp4 0.47 clip5.mp4
+          make_clip defensecon.mp4 0.70 clip6.mp4
+          make_clip foundation.mp4 0.63 clip7.mp4
+          make_clip tactical_alt.mp4 0.69 clip8.mp4
+          make_clip tactical_main.mp4 0.82 clip9.mp4
 
       - name: Build continuous cinematic audio bed
         shell: bash
         run: |
           set -euo pipefail
           cd work
-          ffmpeg -y -hide_banner -loglevel error -ss 2.0 -i tactical.mp4 -t 35.5 -vn -af "highpass=f=30,lowpass=f=18000,loudnorm=I=-14:LRA=8:TP=-1.2,afade=t=in:st=0:d=0.5,afade=t=out:st=34.5:d=1.0" -c:a aac -b:a 320k -ar 48000 -ac 2 audio.m4a
+          AUDIO_SRC=''
+          for F in tactical_alt.mp4 tactical_main.mp4 defensecon.mp4 foundation.mp4; do
+            if ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$F" | grep -q .; then
+              AUDIO_SRC="$F"
+              break
+            fi
+          done
+          if [ -n "$AUDIO_SRC" ]; then
+            echo "Using official source audio from $AUDIO_SRC"
+            ffmpeg -y -hide_banner -loglevel error -stream_loop -1 -ss 1.0 -i "$AUDIO_SRC" -t 35.5 -vn -af "highpass=f=30,lowpass=f=18000,loudnorm=I=-14:LRA=8:TP=-1.2,afade=t=in:st=0:d=0.5,afade=t=out:st=34.5:d=1.0" -c:a aac -b:a 320k -ar 48000 -ac 2 audio.m4a
+          else
+            echo 'Official CDN sources are silent; generating cinematic sci-fi audio bed.'
+            ffmpeg -y -hide_banner -loglevel error -f lavfi -i 'sine=frequency=48:sample_rate=48000:duration=35.5' -f lavfi -i 'sine=frequency=96:sample_rate=48000:duration=35.5' -f lavfi -i 'anoisesrc=color=pink:sample_rate=48000:duration=35.5:amplitude=0.055' -filter_complex "[0:a]volume=0.28,tremolo=f=0.16:d=0.68,aecho=0.8:0.55:120|240:0.22|0.10[low];[1:a]volume=0.08,tremolo=f=0.31:d=0.55[high];[2:a]highpass=f=40,lowpass=f=1400,volume=0.20[noise];[low][high][noise]amix=inputs=3:duration=first:normalize=0,afade=t=in:st=0:d=0.8,afade=t=out:st=34.5:d=1.0,alimiter=limit=0.94,pan=stereo|c0=c0|c1=c0[out]" -map '[out]' -c:a aac -b:a 320k -ar 48000 -ac 2 audio.m4a
+          fi
 
       - name: Render cinematic three-source promo
         shell: bash
