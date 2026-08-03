@@ -1,6 +1,10 @@
 name: Build full-motion Star Citizen promo
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/build-star-citizen-promo.yml
   pull_request:
     branches: [master]
     paths:
@@ -48,7 +52,6 @@ jobs:
             cp source_a.mp4 source_b.mp4
           fi
 
-          # Validate both sources. Fall back to the first official video if needed.
           ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
             -of default=nw=1:nk=1 source_a.mp4 | grep -q .
 
