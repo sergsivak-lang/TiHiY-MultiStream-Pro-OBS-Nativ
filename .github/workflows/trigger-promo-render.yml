@@ -21,6 +21,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          echo "Starting full-motion render"
           gh workflow run build-star-citizen-promo.yml --repo "$GITHUB_REPOSITORY" --ref master
           sleep 12
           RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-star-citizen-promo.yml --branch master --limit 1 --json databaseId --jq '.[0].databaseId')"
