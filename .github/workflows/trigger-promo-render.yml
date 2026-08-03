@@ -1,0 +1,30 @@
+name: Trigger Star Citizen promo render
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/trigger-promo-render.yml
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  issues: write
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch promo renderer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run build-star-citizen-promo.yml --repo "$GITHUB_REPOSITORY" --ref master
+          sleep 12
+          RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-star-citizen-promo.yml --branch master --limit 1 --json databaseId --jq '.[0].databaseId')"
+          RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "PROMO RENDER RUN $RUN_ID" \
+            --body "Full-motion Star Citizen promo render started. Run ID: $RUN_ID\n$RUN_URL"
