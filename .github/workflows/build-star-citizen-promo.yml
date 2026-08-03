@@ -1,18 +1,15 @@
 name: Build full-motion Star Citizen promo
 
 on:
-  push:
+  pull_request_target:
     branches: [master]
     paths:
-      - .github/workflows/build-star-citizen-promo.yml
-  pull_request:
-    branches: [master]
-    paths:
-      - .github/workflows/build-star-citizen-promo.yml
+      - promo-render-trigger.txt
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
 
 jobs:
   render:
@@ -20,10 +17,15 @@ jobs:
     timeout-minutes: 55
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Report render start
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "FULL MOTION PROMO RUN $GITHUB_RUN_ID" \
+            --body "Real moving-video render started. Run ID: $GITHUB_RUN_ID"
 
-      - name: Install render tools
+      - name: Install tools and fonts
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg curl python3
@@ -35,136 +37,79 @@ jobs:
             'https://github.com/google/fonts/raw/main/ofl/exo2/Exo2%5Bwght%5D.ttf' \
             -o work/fonts/Exo2.ttf
 
-      - name: Download official moving footage
-        shell: bash
+      - name: Download official RSI moving footage
         run: |
           set -euo pipefail
-          cd work
-
-          # Official RSI/CIG MP4 files. These are real moving promotional videos.
           curl -fL --retry 5 --retry-delay 3 \
             'https://media.robertsspaceindustries.com/4tsoif8ccdaiq/source.mp4' \
-            -o source_a.mp4
-
-          if ! curl -fL --retry 4 --retry-delay 3 \
-            'https://media.robertsspaceindustries.com/2q1mo9uspa6ij/source.mp4' \
-            -o source_b.mp4; then
-            cp source_a.mp4 source_b.mp4
-          fi
-
+            -o work/source.mp4
           ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
-            -of default=nw=1:nk=1 source_a.mp4 | grep -q .
+            -of default=nw=1:nk=1 work/source.mp4 | grep -q .
+          ffprobe -v error -show_entries format=duration,size -of json work/source.mp4
 
-          if ! ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
-            -of default=nw=1:nk=1 source_b.mp4 | grep -q .; then
-            cp source_a.mp4 source_b.mp4
-          fi
-
-          ls -lh source_a.mp4 source_b.mp4
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 source_a.mp4
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 source_b.mp4
-
-      - name: Cut real-motion sequences
+      - name: Cut six real moving scenes
         shell: bash
         run: |
           set -euo pipefail
           cd work
+          DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 source.mp4)
+          HAS_AUDIO=$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 source.mp4 || true)
 
-          duration() {
-            ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$1"
-          }
-
-          safe_start() {
-            python3 - "$1" "$2" <<'PY'
+          for spec in '0 0.02' '1 0.18' '2 0.35' '3 0.52' '4 0.69' '5 0.84'; do
+            read -r N F <<< "$spec"
+            START=$(python3 - "$DUR" "$F" <<'PY'
 import sys
-length = float(sys.argv[1])
-fraction = float(sys.argv[2])
-clip = 5.3
-start = max(0.0, length * fraction)
-if start + clip > length:
-    start = max(0.0, length - clip - 0.15)
-print(f"{start:.3f}")
+d=float(sys.argv[1]); f=float(sys.argv[2]); clip=5.5
+s=max(0.0,d*f)
+if s+clip>d: s=max(0.0,d-clip-0.1)
+print(f'{s:.3f}')
 PY
-          }
+)
+            echo "clip${N}: ${START}s"
 
-          make_clip() {
-            local src="$1"
-            local frac="$2"
-            local out="$3"
-            local dur start has_audio
-            dur="$(duration "$src")"
-            start="$(safe_start "$dur" "$frac")"
-            has_audio="$(ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$src" || true)"
-
-            echo "Creating $out from $src at $start sec"
-
-            if [[ -n "$has_audio" ]]; then
-              ffmpeg -y -hide_banner -loglevel error \
-                -ss "$start" -i "$src" -t 5.25 \
-                -filter_complex \
-                "[0:v]scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.075:saturation=1.12:brightness=-0.012:gamma=0.98,unsharp=5:5:0.45:5:5:0.0,trim=duration=4.8,setpts=PTS-STARTPTS[v];[0:a]atrim=duration=4.8,asetpts=PTS-STARTPTS,highpass=f=35,lowpass=f=17500,loudnorm=I=-15:LRA=9:TP=-1.5[a]" \
-                -map '[v]' -map '[a]' \
-                -c:v libx264 -preset medium -crf 16 -profile:v high -pix_fmt yuv420p \
-                -c:a aac -b:a 256k -ar 48000 -ac 2 -movflags +faststart "$out"
+            if [[ -n "$HAS_AUDIO" ]]; then
+              ffmpeg -y -hide_banner -loglevel error -ss "$START" -i source.mp4 -t 5.4 \
+                -filter_complex "[0:v]scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.08:saturation=1.13:brightness=-0.01:gamma=0.98,unsharp=5:5:0.42,trim=duration=5,setpts=PTS-STARTPTS[v];[0:a]atrim=duration=5,asetpts=PTS-STARTPTS,highpass=f=35,lowpass=f=17500,loudnorm=I=-15:LRA=9:TP=-1.5[a]" \
+                -map '[v]' -map '[a]' -c:v libx264 -preset medium -crf 16 -profile:v high -pix_fmt yuv420p \
+                -c:a aac -b:a 256k -ar 48000 -ac 2 "clip${N}.mp4"
             else
-              ffmpeg -y -hide_banner -loglevel error \
-                -ss "$start" -i "$src" \
-                -f lavfi -i 'anullsrc=channel_layout=stereo:sample_rate=48000' -t 4.8 \
-                -filter_complex \
-                "[0:v]scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.075:saturation=1.12:brightness=-0.012:gamma=0.98,unsharp=5:5:0.45:5:5:0.0,trim=duration=4.8,setpts=PTS-STARTPTS[v]" \
-                -map '[v]' -map '1:a:0' \
-                -c:v libx264 -preset medium -crf 16 -profile:v high -pix_fmt yuv420p \
-                -c:a aac -b:a 256k -ar 48000 -ac 2 -shortest -movflags +faststart "$out"
+              ffmpeg -y -hide_banner -loglevel error -ss "$START" -i source.mp4 \
+                -f lavfi -i 'anullsrc=channel_layout=stereo:sample_rate=48000' -t 5 \
+                -filter_complex "[0:v]scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.08:saturation=1.13:brightness=-0.01:gamma=0.98,unsharp=5:5:0.42,trim=duration=5,setpts=PTS-STARTPTS[v]" \
+                -map '[v]' -map '1:a:0' -c:v libx264 -preset medium -crf 16 -profile:v high -pix_fmt yuv420p \
+                -c:a aac -b:a 256k -ar 48000 -ac 2 -shortest "clip${N}.mp4"
             fi
-          }
-
-          make_clip source_a.mp4 0.03 clip0.mp4
-          make_clip source_b.mp4 0.12 clip1.mp4
-          make_clip source_a.mp4 0.25 clip2.mp4
-          make_clip source_b.mp4 0.36 clip3.mp4
-          make_clip source_a.mp4 0.52 clip4.mp4
-          make_clip source_b.mp4 0.66 clip5.mp4
-          make_clip source_a.mp4 0.82 clip6.mp4
-
-          for f in clip*.mp4; do
-            ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate \
-              -of default=nw=1 "$f"
           done
 
-      - name: Render cinematic promo with real transitions
+      - name: Render cinematic real-video promo
         shell: bash
         run: |
           set -euo pipefail
           cd work
-
-          cat > filter.txt <<'FILTER'
-[0:v][1:v]xfade=transition=smoothleft:duration=0.45:offset=4.35[v01];
-[v01][2:v]xfade=transition=zoomin:duration=0.45:offset=8.70[v02];
-[v02][3:v]xfade=transition=radial:duration=0.45:offset=13.05[v03];
-[v03][4:v]xfade=transition=smoothup:duration=0.45:offset=17.40[v04];
-[v04][5:v]xfade=transition=circleopen:duration=0.45:offset=21.75[v05];
-[v05][6:v]xfade=transition=fadeblack:duration=0.45:offset=26.10[vbase];
-[0:a][1:a]acrossfade=d=0.45:c1=tri:c2=tri[a01];
-[a01][2:a]acrossfade=d=0.45:c1=tri:c2=tri[a02];
-[a02][3:a]acrossfade=d=0.45:c1=tri:c2=tri[a03];
-[a03][4:a]acrossfade=d=0.45:c1=tri:c2=tri[a04];
-[a04][5:a]acrossfade=d=0.45:c1=tri:c2=tri[a05];
-[a05][6:a]acrossfade=d=0.45:c1=tri:c2=tri[abase];
-[vbase]vignette=PI/5.5,
- drawtext=fontfile='fonts/Orbitron.ttf':text='STAR CITIZEN':fontcolor=white:fontsize=142:borderw=3:bordercolor=black@0.85:shadowx=7:shadowy=7:shadowcolor=black@0.75:x=(w-text_w)/2:y=h*0.42:enable='between(t,0.35,3.65)':alpha='if(lt(t,0.85),(t-0.35)/0.5,if(lt(t,3.0),1,(3.65-t)/0.65))',
- drawtext=fontfile='fonts/Exo2.ttf':text='TiHiY-DED':fontcolor=white:fontsize=126:borderw=3:bordercolor=black@0.9:shadowx=8:shadowy=8:shadowcolor=black@0.8:x=(w-text_w)/2:y=h*0.44:enable='between(t,27.15,30.75)':alpha='if(lt(t,27.7),(t-27.15)/0.55,if(lt(t,30.1),1,(30.75-t)/0.65))',
- fade=t=in:st=0:d=0.18,fade=t=out:st=30.55:d=0.35[vout];
-[abase]afade=t=in:st=0:d=0.25,afade=t=out:st=30.25:d=0.6,alimiter=limit=0.94[aout]
-FILTER
+          cat > fx.txt <<'EOF'
+[0:v][1:v]xfade=transition=smoothleft:duration=0.50:offset=4.50[v1];
+[v1][2:v]xfade=transition=zoomin:duration=0.50:offset=9.00[v2];
+[v2][3:v]xfade=transition=radial:duration=0.50:offset=13.50[v3];
+[v3][4:v]xfade=transition=smoothup:duration=0.50:offset=18.00[v4];
+[v4][5:v]xfade=transition=fadeblack:duration=0.50:offset=22.50[vbase];
+[0:a][1:a]acrossfade=d=0.50:c1=tri:c2=tri[a1];
+[a1][2:a]acrossfade=d=0.50:c1=tri:c2=tri[a2];
+[a2][3:a]acrossfade=d=0.50:c1=tri:c2=tri[a3];
+[a3][4:a]acrossfade=d=0.50:c1=tri:c2=tri[a4];
+[a4][5:a]acrossfade=d=0.50:c1=tri:c2=tri[abase];
+[vbase]vignette=PI/6,
+ drawtext=fontfile='fonts/Orbitron.ttf':text='STAR CITIZEN':fontcolor=white:fontsize=150:borderw=4:bordercolor=black@0.88:shadowx=8:shadowy=8:shadowcolor=black@0.8:x=(w-text_w)/2:y=h*0.42:enable='between(t,0.35,3.85)':alpha='if(lt(t,0.90),(t-0.35)/0.55,if(lt(t,3.10),1,(3.85-t)/0.75))',
+ drawtext=fontfile='fonts/Exo2.ttf':text='TiHiY-DED':fontcolor=white:fontsize=132:borderw=4:bordercolor=black@0.9:shadowx=8:shadowy=8:shadowcolor=black@0.82:x=(w-text_w)/2:y=h*0.44:enable='between(t,23.05,27.45)':alpha='if(lt(t,23.70),(t-23.05)/0.65,if(lt(t,26.70),1,(27.45-t)/0.75))',
+ fade=t=in:st=0:d=0.20,fade=t=out:st=27.00:d=0.50[vout];
+[abase]afade=t=in:st=0:d=0.25,afade=t=out:st=26.75:d=0.75,alimiter=limit=0.95[aout]
+EOF
 
           ffmpeg -y -hide_banner -loglevel error \
-            -i clip0.mp4 -i clip1.mp4 -i clip2.mp4 -i clip3.mp4 \
-            -i clip4.mp4 -i clip5.mp4 -i clip6.mp4 \
-            -filter_complex_script filter.txt \
-            -map '[vout]' -map '[aout]' \
+            -i clip0.mp4 -i clip1.mp4 -i clip2.mp4 -i clip3.mp4 -i clip4.mp4 -i clip5.mp4 \
+            -filter_complex_script fx.txt -map '[vout]' -map '[aout]' \
             -c:v libx264 -preset slow -crf 16 -profile:v high -level 5.2 -pix_fmt yuv420p \
-            -c:a aac -b:a 320k -ar 48000 -ac 2 \
-            -movflags +faststart ../output/TiHiY_STAR_CITIZEN_FULL_MOTION_PROMO_2K_60FPS.mp4
+            -c:a aac -b:a 320k -ar 48000 -ac 2 -movflags +faststart \
+            ../output/TiHiY_STAR_CITIZEN_FULL_MOTION_PROMO_2K_60FPS.mp4
 
           ffmpeg -y -hide_banner -loglevel error \
             -i ../output/TiHiY_STAR_CITIZEN_FULL_MOTION_PROMO_2K_60FPS.mp4 \
@@ -173,25 +118,27 @@ FILTER
             -c:a copy -movflags +faststart \
             ../output/TiHiY_STAR_CITIZEN_FULL_MOTION_PROMO_1080p_60FPS.mp4
 
-          ffmpeg -y -hide_banner -loglevel error \
-            -ss 00:00:00.80 -i ../output/TiHiY_STAR_CITIZEN_FULL_MOTION_PROMO_2K_60FPS.mp4 \
-            -frames:v 1 ../output/PREVIEW_START.jpg
-          ffmpeg -y -hide_banner -loglevel error \
-            -ss 00:00:14.50 -i ../output/TiHiY_STAR_CITIZEN_FULL_MOTION_PROMO_2K_60FPS.mp4 \
-            -frames:v 1 ../output/PREVIEW_MIDDLE.jpg
-          ffmpeg -y -hide_banner -loglevel error \
-            -ss 00:00:28.50 -i ../output/TiHiY_STAR_CITIZEN_FULL_MOTION_PROMO_2K_60FPS.mp4 \
-            -frames:v 1 ../output/PREVIEW_END.jpg
-
           ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,r_frame_rate \
             -of json ../output/TiHiY_STAR_CITIZEN_FULL_MOTION_PROMO_2K_60FPS.mp4
-          ls -lh ../output
 
-      - name: Upload finished full-motion promo
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TiHiY-Star-Citizen-Full-Motion-Promo
-          path: output/*
-          if-no-files-found: error
+          path: output/*.mp4
           compression-level: 0
           retention-days: 7
+
+      - name: Publish downloadable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="star-citizen-promo-${GITHUB_RUN_ID}"
+          gh release create "$TAG" output/*.mp4 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TiHiY Star Citizen Full-Motion Promo" \
+            --notes "Real moving Star Citizen footage. 2K/60 and 1080p/60 versions."
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "FULL MOTION PROMO READY $GITHUB_RUN_ID" \
+            --body "Render completed. Release: $RELEASE_URL"
