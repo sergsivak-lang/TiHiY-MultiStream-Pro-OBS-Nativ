@@ -1,0 +1,27 @@
+name: Report Star Citizen promo render
+
+on:
+  pull_request_target:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+    paths:
+      - promo-three-source-trigger.txt
+
+permissions:
+  actions: read
+  issues: write
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report renderer run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 20
+          RUN_DATA=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow render-star-citizen-three-source.yml --event pull_request_target --limit 1 --json databaseId,status,conclusion,url)
+          RUN_ID=$(echo "$RUN_DATA" | jq -r '.[0].databaseId')
+          RUN_URL=$(echo "$RUN_DATA" | jq -r '.[0].url')
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "THREE SOURCE PROMO RUN $RUN_ID" --body "Tactical Strike + DefenseCon + Foundation Festival render. Run: $RUN_URL"
