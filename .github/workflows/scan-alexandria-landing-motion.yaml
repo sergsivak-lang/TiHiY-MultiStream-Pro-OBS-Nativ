@@ -1,0 +1,121 @@
+name: Scan Alexandria Landing Motion Assets
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[ALEXMOTION]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl python3 ffmpeg
+          mkdir -p pages output downloads
+
+      - name: Fetch new RSI pages and their Alexandria layouts
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A PAGES=(
+            [frontier]='https://robertsspaceindustries.com/en/comm-link/transmission/21220-Alpha-49-Frontier-Tensions'
+            [basher]='https://robertsspaceindustries.com/en/comm-link/transmission/21227-Grey-s-Market-Basher'
+          )
+          for K in frontier basher; do
+            curl -fL --compressed --retry 5 --retry-delay 2 -A 'Mozilla/5.0 Chrome/150 Safari/537.36' "${PAGES[$K]}" -o "pages/${K}_page.html"
+            python3 - "$K" <<'PY'
+          import re,sys
+          from pathlib import Path
+          k=sys.argv[1]
+          s=Path(f'pages/{k}_page.html').read_text(errors='ignore')
+          m=re.search(r"const\s+s3Url\s*=\s*'([^']+)'",s)
+          if not m: raise SystemExit(f'No Alexandria s3Url for {k}')
+          Path(f'pages/{k}_alex_url.txt').write_text(m.group(1))
+          print(k,m.group(1))
+          PY
+            URL=$(cat "pages/${K}_alex_url.txt")
+            curl -fL --compressed --retry 5 --retry-delay 2 -A 'Mozilla/5.0 Chrome/150 Safari/537.36' "$URL" -o "pages/${K}_alex.html"
+            cp "pages/${K}_alex.html" "output/${K}_alex.html"
+            cp "pages/${K}_alex_url.txt" "output/${K}_alex_url.txt"
+          done
+
+      - name: Extract every moving-media candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re,html,json
+          from pathlib import Path
+          for p in Path('pages').glob('*_alex.html'):
+              k=p.name.split('_alex.html')[0]
+              raw=p.read_text(errors='ignore')
+              s=html.unescape(raw).replace('\\/','/')
+              urls=[]
+              # quoted URL/path candidates
+              for pat in [
+                  r'https?://[^"\'<>\s]+',
+                  r'//[^"\'<>\s]+',
+                  r'["\']([^"\']+\.(?:mp4|webm|mov|m3u8|mpd|gif|webp)(?:\?[^"\']*)?)["\']',
+              ]:
+                  vals=re.findall(pat,s,re.I)
+                  urls.extend(vals)
+              keep=[]
+              for u in urls:
+                  if isinstance(u,tuple): u=''.join(u)
+                  if not u: continue
+                  low=u.lower()
+                  if any(x in low for x in ['.mp4','.webm','.mov','.m3u8','.mpd','.gif','video','stream','motion','animation']):
+                      if u.startswith('//'): u='https:'+u
+                      u=u.rstrip('),;]')
+                      if u not in keep: keep.append(u)
+              # all media RSI URLs regardless extension, to catch extensionless CDN endpoints
+              media=sorted(set(re.findall(r'https?://(?:media|cdn)\.robertsspaceindustries\.com/[^"\'<>\s]+',s,re.I)))
+              hashes=sorted(set(re.findall(r'(?:media|cdn)\.robertsspaceindustries\.com/([a-z0-9]{8,})/',s,re.I)))
+              # component tags / attributes
+              snippets=[]
+              for m in re.finditer(r'(?i)(<video|<source|video-|video_|background.?video|autoplay|loop|motion|animation|webm|mp4|m3u8|source-url|source_url)',s):
+                  snippets.append(s[max(0,m.start()-700):min(len(s),m.end()+1200)])
+                  if len(snippets)>=300: break
+              Path(f'output/{k}_moving_candidates.txt').write_text('\n'.join(keep))
+              Path(f'output/{k}_all_rsi_media.txt').write_text('\n'.join(media))
+              Path(f'output/{k}_hashes.txt').write_text('\n'.join(hashes))
+              Path(f'output/{k}_motion_snippets.txt').write_text('\n\n---\n\n'.join(snippets))
+              print('\n###',k,'moving candidates')
+              print('\n'.join(keep))
+              print('### hashes',hashes)
+          PY
+
+      - name: Probe direct motion URLs found in Alexandria
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess, pathlib, json, urllib.parse
+          report=[]
+          for f in pathlib.Path('output').glob('*_moving_candidates.txt'):
+              prefix=f.name.split('_moving_candidates')[0]
+              for i,u in enumerate(f.read_text().splitlines()):
+                  if not u.startswith('http'): continue
+                  if not any(x in u.lower() for x in ['.mp4','.webm','.mov','.m3u8','.mpd']): continue
+                  p=subprocess.run(['curl','-ILsS','--max-time','15','-A','Mozilla/5.0',u],capture_output=True,text=True)
+                  report.append({'page':prefix,'url':u,'returncode':p.returncode,'headers':p.stdout[-5000:]})
+          pathlib.Path('output/probe_report.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+
+      - name: Upload Alexandria motion scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-Alexandria-Landing-Motion-Scan
+          path: output/*
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
