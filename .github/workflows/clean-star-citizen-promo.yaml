@@ -1,0 +1,233 @@
+name: Clean Star Citizen Music Promo
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[CLEANPROMO]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl python3 python3-numpy
+          mkdir -p work/clips output
+
+      - name: Download clean official RSI footage
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          curl -fL --retry 8 --retry-delay 3 --continue-at - 'https://media.robertsspaceindustries.com/in35u0wsdl5ys/source.mp4' -o tactical.mp4
+          curl -fL --retry 8 --retry-delay 3 --continue-at - 'https://media.robertsspaceindustries.com/ek2roy7yuiw58/source.mp4' -o defensecon.mp4
+          curl -fL --retry 8 --retry-delay 3 --continue-at - 'https://media.robertsspaceindustries.com/4tsoif8ccdaiq/source.mp4' -o foundation.mp4
+          for F in tactical.mp4 defensecon.mp4 foundation.mp4; do
+            ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of default=nw=1 "$F"
+          done
+
+      - name: Cut only text-free cinematic scenes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          make_clip() {
+            SRC="$1"; START="$2"; OUT="$3"
+            ffmpeg -y -hide_banner -loglevel error -ss "$START" -i "$SRC" -t 3.1818 -an \
+              -vf "scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.065:saturation=1.10:brightness=-0.008:gamma=0.99,unsharp=5:5:0.30" \
+              -c:v libx264 -preset veryfast -crf 17 -profile:v high -pix_fmt yuv420p "clips/$OUT"
+          }
+
+          # Ranges visually checked from timestamped contact sheets: no baked-in promo titles.
+          make_clip tactical.mp4   0.00 clip00.mp4
+          make_clip foundation.mp4 0.00 clip01.mp4
+          make_clip tactical.mp4   3.00 clip02.mp4
+          make_clip defensecon.mp4 0.00 clip03.mp4
+          make_clip tactical.mp4   8.20 clip04.mp4
+          make_clip foundation.mp4 3.00 clip05.mp4
+          make_clip tactical.mp4  12.00 clip06.mp4
+          make_clip defensecon.mp4 5.40 clip07.mp4
+          make_clip foundation.mp4 11.70 clip08.mp4
+          make_clip tactical.mp4  15.40 clip09.mp4
+
+          : > concat.txt
+          for N in 00 01 02 03 04 05 06 07 08 09; do
+            echo "file '$(pwd)/clips/clip${N}.mp4'" >> concat.txt
+          done
+          ffmpeg -y -hide_banner -loglevel error -f concat -safe 0 -i concat.txt \
+            -vf "fade=t=in:st=0:d=0.20,fade=t=out:st=31.15:d=0.60,vignette=PI/9" \
+            -c:v libx264 -preset medium -crf 16 -profile:v high -level 5.2 -pix_fmt yuv420p -an clean_video.mp4
+
+      - name: Compose original driving epic soundtrack
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          cat > make_music.py <<'PY'
+          import numpy as np
+          import wave
+
+          sr = 48000
+          bpm = 132.0
+          beat = 60.0 / bpm
+          scene = beat * 7.0
+          duration = scene * 10.0
+          n = int(sr * duration)
+          t = np.arange(n, dtype=np.float64) / sr
+          rng = np.random.default_rng(2956)
+
+          left = np.zeros(n, dtype=np.float64)
+          right = np.zeros(n, dtype=np.float64)
+
+          # D minor cinematic progression, one harmony per video scene.
+          roots = [73.416, 58.270, 87.307, 65.406, 73.416, 58.270, 87.307, 65.406, 69.296, 73.416]
+          thirds = [1.1892, 1.1892, 1.2599, 1.2599, 1.1892, 1.1892, 1.2599, 1.2599, 1.1892, 1.1892]
+
+          def add_tone(buf, start, dur, freq, amp, harmonics=(1.0, .35, .18), attack=.01, release=.12, phase=0.0):
+              i0 = max(0, int(start * sr)); i1 = min(n, int((start + dur) * sr))
+              if i1 <= i0: return
+              tt = np.arange(i1-i0, dtype=np.float64) / sr
+              sig = np.zeros_like(tt)
+              for h, a in enumerate(harmonics, start=1):
+                  sig += a * np.sin(2*np.pi*freq*h*tt + phase*h)
+              env = np.ones_like(tt)
+              na = min(len(tt), int(attack*sr))
+              nr = min(len(tt), int(release*sr))
+              if na > 0: env[:na] *= np.linspace(0,1,na)
+              if nr > 0: env[-nr:] *= np.linspace(1,0,nr)
+              buf[i0:i1] += amp * sig * env
+
+          # Pads, low brass and scene impacts.
+          for s in range(10):
+              st = s * scene
+              root = roots[s]
+              third = root * thirds[s]
+              fifth = root * 1.4983
+              add_tone(left, st, scene+.15, root, .09, (1,.30,.16), .22, .35, 0.0)
+              add_tone(right, st, scene+.15, root, .09, (1,.30,.16), .22, .35, .18)
+              add_tone(left, st, scene+.15, third, .035, (1,.18), .25, .35, .08)
+              add_tone(right, st, scene+.15, fifth, .040, (1,.18), .25, .35, .20)
+              add_tone(left, st, .85, root/2, .18, (1,.45,.22), .005, .50, 0)
+              add_tone(right, st, .85, root/2, .18, (1,.45,.22), .005, .50, .10)
+
+              if s > 0:
+                  i0 = int(st*sr); i1 = min(n, i0+int(.42*sr))
+                  tt = np.arange(i1-i0)/sr
+                  boom = np.sin(2*np.pi*(58 - 20*tt)*tt) * np.exp(-8*tt)
+                  grit = rng.normal(0,1,len(tt)) * np.exp(-16*tt)
+                  left[i0:i1] += .34*boom + .055*grit
+                  right[i0:i1] += .34*boom - .045*grit
+
+          # Beat-driven kick, snare and bass.
+          beats = int(np.ceil(duration / beat))
+          for b in range(beats):
+              st = b * beat
+              scene_id = min(9, int(st / scene))
+              root = roots[scene_id]
+
+              # Kick with falling pitch.
+              i0 = int(st*sr); i1 = min(n, i0+int(.26*sr))
+              tt = np.arange(i1-i0)/sr
+              phase = 2*np.pi*(92*tt - 36*tt*tt)
+              kick = np.sin(phase) * np.exp(-17*tt)
+              left[i0:i1] += .32*kick; right[i0:i1] += .32*kick
+
+              # Bass pulse.
+              add_tone(left, st, beat*.86, root, .095, (1,.25), .005, .15, 0)
+              add_tone(right, st, beat*.86, root, .095, (1,.25), .005, .15, .07)
+
+              # Snare on 2 and 4.
+              if b % 4 in (1,3):
+                  i0 = int(st*sr); i1 = min(n, i0+int(.18*sr))
+                  tt = np.arange(i1-i0)/sr
+                  noise = rng.normal(0,1,len(tt))
+                  hp = np.concatenate([[0], np.diff(noise)])
+                  env = np.exp(-22*tt)
+                  sn = (.085*hp + .035*np.sin(2*np.pi*185*tt)) * env
+                  left[i0:i1] += sn; right[i0:i1] += sn
+
+          # Eighth-note hats and arpeggio.
+          half = beat/2
+          chord_intervals = [1.0, 1.1892, 1.4983, 2.0]
+          for k, st in enumerate(np.arange(0, duration, half)):
+              i0 = int(st*sr); i1 = min(n, i0+int(.055*sr))
+              tt = np.arange(i1-i0)/sr
+              noise = rng.normal(0,1,len(tt)); hp = np.concatenate([[0],np.diff(noise)])
+              hat = hp * np.exp(-48*tt) * (.022 if k%2 else .030)
+              pan = .66 if k%2 else .34
+              left[i0:i1] += hat*(1-pan); right[i0:i1] += hat*pan
+
+              sid = min(9, int(st/scene))
+              root = roots[sid] * 4
+              freq = root * chord_intervals[k % len(chord_intervals)]
+              add_tone(left, st, half*.72, freq, .020, (1,.18), .005, .08, 0)
+              add_tone(right, st, half*.72, freq, .020, (1,.18), .005, .08, .12)
+
+          # Risers into every scene cut.
+          for s in range(1,10):
+              cut = s * scene
+              dur = .52
+              i0 = int((cut-dur)*sr); i1 = int(cut*sr)
+              tt = np.arange(i1-i0)/sr
+              env = (tt/dur)**1.8
+              chirp_phase = 2*np.pi*(180*tt + 310*tt*tt)
+              chirp = np.sin(chirp_phase) * env
+              noise = rng.normal(0,1,len(tt)); hp = np.concatenate([[0],np.diff(noise)]) * env
+              left[i0:i1] += .035*chirp + .025*hp
+              right[i0:i1] += .035*np.sin(chirp_phase+.4) + .025*hp
+
+          # Cinematic build: second half slightly louder.
+          build = np.interp(t, [0, 2, duration*.45, duration*.82, duration], [.45, .75, .82, 1.05, .18])
+          left *= build; right *= build
+
+          # Gentle widening, saturation and limiting.
+          mono = (left + right) * .5
+          side = (left - right) * .58
+          left = mono + side; right = mono - side
+          stereo = np.stack([left,right], axis=1)
+          stereo = np.tanh(stereo * 1.28)
+          peak = np.max(np.abs(stereo))
+          if peak > 0: stereo *= .93 / peak
+          pcm = (stereo * 32767).astype(np.int16)
+
+          with wave.open('epic_music.wav','wb') as w:
+              w.setnchannels(2); w.setsampwidth(2); w.setframerate(sr); w.writeframes(pcm.tobytes())
+          print(f'duration={duration:.3f}s')
+          PY
+          python3 make_music.py
+          ffmpeg -y -hide_banner -loglevel error -i epic_music.wav \
+            -af "highpass=f=26,lowpass=f=17500,acompressor=threshold=-14dB:ratio=2.4:attack=15:release=180,loudnorm=I=-12.5:LRA=8:TP=-1.0,afade=t=in:st=0:d=0.35,afade=t=out:st=30.9:d=0.8" \
+            -c:a aac -b:a 320k -ar 48000 -ac 2 epic_music.m4a
+
+      - name: Mux clean video and epic music
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          ffmpeg -y -hide_banner -loglevel error -i clean_video.mp4 -i epic_music.m4a \
+            -map 0:v:0 -map 1:a:0 -c:v copy -c:a copy -shortest -movflags +faststart \
+            ../output/TiHiY_STAR_CITIZEN_CLEAN_EPIC_PROMO_2K_60FPS.mp4
+          ffmpeg -y -hide_banner -loglevel error -i ../output/TiHiY_STAR_CITIZEN_CLEAN_EPIC_PROMO_2K_60FPS.mp4 \
+            -vf 'scale=1920:1080:flags=lanczos' -c:v libx264 -preset medium -crf 19 -profile:v high -pix_fmt yuv420p \
+            -c:a copy -movflags +faststart ../output/TiHiY_STAR_CITIZEN_CLEAN_EPIC_PROMO_1080p_60FPS.mp4
+          ffmpeg -y -hide_banner -loglevel error -ss 3.0 -i ../output/TiHiY_STAR_CITIZEN_CLEAN_EPIC_PROMO_1080p_60FPS.mp4 -frames:v 1 ../output/PREVIEW_01.jpg
+          ffmpeg -y -hide_banner -loglevel error -ss 15.0 -i ../output/TiHiY_STAR_CITIZEN_CLEAN_EPIC_PROMO_1080p_60FPS.mp4 -frames:v 1 ../output/PREVIEW_02.jpg
+          ffmpeg -y -hide_banner -loglevel error -ss 27.0 -i ../output/TiHiY_STAR_CITIZEN_CLEAN_EPIC_PROMO_1080p_60FPS.mp4 -frames:v 1 ../output/PREVIEW_03.jpg
+          ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,r_frame_rate -of json ../output/TiHiY_STAR_CITIZEN_CLEAN_EPIC_PROMO_2K_60FPS.mp4
+
+      - name: Upload clean promo
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-Star-Citizen-Clean-Epic-Promo
+          path: output/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
