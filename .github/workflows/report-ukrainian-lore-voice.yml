@@ -1,0 +1,24 @@
+name: Report Ukrainian Lore Voice
+
+on:
+  workflow_run:
+    workflows: ["Generate Ukrainian Lore Voice"]
+    types: [completed]
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report run and artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          sleep 5
+          ARTIFACTS=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts" --jq '[.artifacts[] | {id,name,size_in_bytes,expired}]')
+          gh issue create --title "UKRAINIAN LORE VOICE RUN ${RUN_ID}" --body "Conclusion: ${CONCLUSION}\n\nArtifacts:\n\`\`\`json\n${ARTIFACTS}\n\`\`\`"
