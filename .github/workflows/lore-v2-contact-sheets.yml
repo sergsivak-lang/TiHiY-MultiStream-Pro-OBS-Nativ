@@ -1,0 +1,60 @@
+name: Star Citizen Lore V2 contact sheets
+
+on:
+  pull_request_target:
+    branches: [master]
+    paths:
+      - lore-v2-contact-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storyboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl python3-pip
+          python3 -m pip install --break-system-packages -q yt-dlp
+          mkdir -p work sheets
+
+      - name: Download official moving sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          curl -fL --retry 12 --retry-all-errors --retry-delay 2 -C - 'https://media.robertsspaceindustries.com/in35u0wsdl5ys/source.mp4' -o tactical.mp4
+          curl -fL --retry 12 --retry-all-errors --retry-delay 2 -C - 'https://media.robertsspaceindustries.com/ek2roy7yuiw58/source.mp4' -o defensecon.mp4
+          curl -fL --retry 12 --retry-all-errors --retry-delay 2 -C - 'https://media.robertsspaceindustries.com/4tsoif8ccdaiq/source.mp4' -o foundation.mp4
+          curl -fL --retry 12 --retry-all-errors --retry-delay 2 -C - 'https://media.robertsspaceindustries.com/9vuck22dgycnl/source.mp4' -o recent_rsi.mp4
+
+          python3 -m yt_dlp --no-playlist --extractor-args 'youtube:player_client=android,web' -f 'bv*[height<=1440]+ba/b[height<=1440]' --merge-output-format mp4 -o patch49.mp4 'https://www.youtube.com/watch?v=OX__JZULs-Y' || cp recent_rsi.mp4 patch49.mp4
+          python3 -m yt_dlp --no-playlist --extractor-args 'youtube:player_client=android,web' -f 'bv*[height<=1440]+ba/b[height<=1440]' --merge-output-format mp4 -o basher.mp4 'https://www.youtube.com/watch?v=whpBNeYsJQA' || cp defensecon.mp4 basher.mp4
+
+          for F in tactical.mp4 defensecon.mp4 foundation.mp4 recent_rsi.mp4 patch49.mp4 basher.mp4; do
+            echo "===== $F ====="
+            ffprobe -v error -show_entries format=duration,size:stream=codec_name,codec_type,width,height -of json "$F"
+          done
+
+      - name: Build timestamped contact sheets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          for F in tactical defensecon foundation recent_rsi patch49 basher; do
+            DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "${F}.mp4")
+            STEP=$(awk -v d="$DUR" 'BEGIN{s=d/15.0; if(s<3)s=3; printf "%.3f",s}')
+            ffmpeg -y -hide_banner -loglevel error -i "${F}.mp4" -vf "fps=1/${STEP},scale=480:-2,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%{pts\\:hms}':x=12:y=12:fontsize=28:fontcolor=white:borderw=3:bordercolor=black,tile=4x4:padding=8:margin=8:color=0x080d12" -frames:v 1 "../sheets/${F}.jpg"
+          done
+
+      - name: Upload storyboard sheets
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-Lore-V2-Contact-Sheets
+          path: sheets/*.jpg
+          compression-level: 0
+          retention-days: 7
