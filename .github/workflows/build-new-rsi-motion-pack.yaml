@@ -25,34 +25,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fL --compressed --retry 5 -A 'Mozilla/5.0 Chrome/150 Safari/537.36' \
-            'https://robertsspaceindustries.com/en/comm-link?text=Gatac%20Tyilui' -o pages/search_tyilui.html
-          curl -fL --compressed --retry 5 -A 'Mozilla/5.0 Chrome/150 Safari/537.36' \
-            'https://robertsspaceindustries.com/en/comm-link?text=Gatac%20Railen' -o pages/search_railen.html
+          curl -fL --compressed --retry 5 -A 'Mozilla/5.0 Chrome/150 Safari/537.36' 'https://robertsspaceindustries.com/en/comm-link?text=Gatac%20Tyilui' -o pages/search_tyilui.html
+          curl -fL --compressed --retry 5 -A 'Mozilla/5.0 Chrome/150 Safari/537.36' 'https://robertsspaceindustries.com/en/comm-link?text=Gatac%20Railen' -o pages/search_railen.html
           python3 - <<'PY'
-          import re,html
+          import re,html,json
           from pathlib import Path
-          found={
-            'frontier':'https://robertsspaceindustries.com/en/comm-link/transmission/21220-Alpha-49-Frontier-Tensions',
-            'basher':'https://robertsspaceindustries.com/en/comm-link/transmission/21227-Grey-s-Market-Basher',
-          }
+          found={'frontier':'https://robertsspaceindustries.com/en/comm-link/transmission/21220-Alpha-49-Frontier-Tensions','basher':'https://robertsspaceindustries.com/en/comm-link/transmission/21227-Grey-s-Market-Basher'}
           tests=[('tyilui','pages/search_tyilui.html',['gatac tyilui','transcend the ordinary']),('railen','pages/search_railen.html',['gatac railen','different way to haul'])]
           for key,path,needles in tests:
               s=html.unescape(Path(path).read_text(errors='ignore')).replace('\\/','/')
               candidates=[]
               for m in re.finditer(r'href=["\']([^"\']*/comm-link/transmission/[^"\']+)["\']',s,re.I):
                   u=m.group(1); context=re.sub(r'<[^>]+>',' ',s[max(0,m.start()-600):min(len(s),m.end()+800)])
-                  low=' '.join(context.lower().split())
-                  score=sum(1 for n in needles if n in low)
+                  low=' '.join(context.lower().split()); score=sum(1 for n in needles if n in low)
                   if score:
                       if u.startswith('/'): u='https://robertsspaceindustries.com'+u
                       elif not u.startswith('http'): u='https://robertsspaceindustries.com/'+u.lstrip('/')
-                      candidates.append((score,u,low[:1000]))
-              if not candidates:
-                  raise SystemExit(f'Could not discover current {key} landing page')
-              candidates.sort(reverse=True)
-              found[key]=candidates[0][1]
-          Path('output/meta/pages.json').write_text(__import__('json').dumps(found,indent=2))
+                      candidates.append((score,u))
+              if not candidates: raise SystemExit(f'Could not discover current {key} landing page')
+              candidates.sort(reverse=True); found[key]=candidates[0][1]
+          Path('output/meta/pages.json').write_text(json.dumps(found,indent=2))
           for k,u in found.items(): print(k,u)
           PY
 
@@ -65,11 +57,9 @@ jobs:
           pages=json.loads(pathlib.Path('output/meta/pages.json').read_text())
           for k,u in pages.items():
               subprocess.run(['curl','-fL','--compressed','--retry','5','-A','Mozilla/5.0 Chrome/150 Safari/537.36',u,'-o',f'pages/{k}.html'],check=True)
-              s=pathlib.Path(f'pages/{k}.html').read_text(errors='ignore')
-              m=re.search(r"const\s+s3Url\s*=\s*'([^']+)'",s)
+              s=pathlib.Path(f'pages/{k}.html').read_text(errors='ignore'); m=re.search(r"const\s+s3Url\s*=\s*'([^']+)'",s)
               if not m: raise SystemExit(f'No Alexandria layout URL for {k}')
-              au=m.group(1)
-              pathlib.Path(f'output/meta/{k}_alex_url.txt').write_text(au+'\n')
+              au=m.group(1); pathlib.Path(f'output/meta/{k}_alex_url.txt').write_text(au+'\n')
               subprocess.run(['curl','-fL','--compressed','--retry','5','-A','Mozilla/5.0 Chrome/150 Safari/537.36',au,'-o',f'alex/{k}.html'],check=True)
           PY
 
@@ -78,14 +68,13 @@ jobs:
         run: |
           set -euo pipefail
           cat > discover.py <<'PY'
-          import re,html,json,subprocess,pathlib,os
+          import re,html,json,subprocess,pathlib
           pages=['frontier','basher','tyilui','railen']
           variants=['source.mp4','mp4_3440.mp4','mp4_2560.mp4','mp4_1920.mp4','webm_1920.webm','mp4_1280.mp4','webm_1280.webm']
           final={}
           for k in pages:
               s=html.unescape(pathlib.Path(f'alex/{k}.html').read_text(errors='ignore')).replace('\\/','/')
-              explicit=[]
-              explicit += re.findall(r'https?://[^"\'<>\s]+\.(?:mp4|webm|mov)(?:\?[^"\'<>\s]*)?',s,re.I)
+              explicit=re.findall(r'https?://[^"\'<>\s]+\.(?:mp4|webm|mov)(?:\?[^"\'<>\s]*)?',s,re.I)
               hashes=sorted(set(re.findall(r'(?:media|cdn)\.robertsspaceindustries\.com/([a-z0-9]{8,})/',s,re.I)))
               urls=[]
               for u in explicit:
@@ -94,15 +83,10 @@ jobs:
               for h in hashes:
                   for v in variants:
                       u=f'https://media.robertsspaceindustries.com/{h}/{v}'
-                      # HEAD; accept only real video responses with useful size.
-                      p=subprocess.run(['curl','-ILsS','--max-time','10','-A','Mozilla/5.0',u],capture_output=True,text=True)
-                      hdr=p.stdout.lower()
-                      if p.returncode==0 and ('content-type: video/' in hdr):
-                          m=re.findall(r'content-length:\s*(\d+)',hdr)
-                          size=max([int(x) for x in m], default=0)
-                          if size>=500000 and u not in urls:
-                              urls.append(u)
-              # Prefer source.mp4 then widest mp4; dedupe same hash to one best URL.
+                      p=subprocess.run(['curl','-ILsS','--max-time','10','-A','Mozilla/5.0',u],capture_output=True,text=True); hdr=p.stdout.lower()
+                      if p.returncode==0 and 'content-type: video/' in hdr:
+                          lengths=[int(x) for x in re.findall(r'content-length:\s*(\d+)',hdr)]
+                          if max(lengths,default=0)>=500000 and u not in urls: urls.append(u)
               by_hash={}
               def rank(u):
                   name=u.split('/')[-1].lower()
@@ -113,13 +97,12 @@ jobs:
                   if '.mp4' in name: return 70
                   return 50
               for u in urls:
-                  m=re.search(r'industries\.com/([a-z0-9]+)/',u,re.I)
-                  key=m.group(1) if m else u
+                  m=re.search(r'industries\.com/([a-z0-9]+)/',u,re.I); key=m.group(1) if m else u
                   if key not in by_hash or rank(u)>rank(by_hash[key]): by_hash[key]=u
               selected=sorted(by_hash.values(),key=rank,reverse=True)[:8]
               final[k]={'hashes':hashes,'selected':selected}
-              pathlib.Path(f'output/meta/{k}_motion_urls.txt').write_text('\n'.join(selected))
-              print('\n',k,'\n'+'\n'.join(selected))
+              pathlib.Path(f'output/meta/{k}_motion_urls.txt').write_text('\n'.join(selected) + ('\n' if selected else ''))
+              print(k,selected)
           pathlib.Path('output/meta/discovery.json').write_text(json.dumps(final,indent=2))
           PY
           python3 discover.py
@@ -130,11 +113,11 @@ jobs:
           set -euo pipefail
           for K in frontier basher tyilui railen; do
             N=0
-            while IFS= read -r URL; do
+            while IFS= read -r URL || [ -n "$URL" ]; do
               [ -n "$URL" ] || continue
               OUT="output/videos/${K}_${N}.mp4"
               echo "Downloading $K $N: $URL"
-              curl -fL --retry 6 --retry-delay 2 --continue-at - -A 'Mozilla/5.0' "$URL" -o "$OUT" || { rm -f "$OUT"; continue; }
+              curl -fL --retry 6 --retry-delay 2 -A 'Mozilla/5.0' "$URL" -o "$OUT" || { rm -f "$OUT"; continue; }
               if ! ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" | grep -q .; then rm -f "$OUT"; continue; fi
               ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,r_frame_rate -of json "$OUT" > "output/meta/${K}_${N}_info.json"
               N=$((N+1))
@@ -150,16 +133,14 @@ jobs:
           for F in output/videos/*.mp4; do
             [ -f "$F" ] || continue
             B=$(basename "$F" .mp4)
-            ffmpeg -y -hide_banner -loglevel error -i "$F" \
-              -vf "fps=1/2,scale=480:-2,drawtext=fontfile=${FONT}:text='%{pts\\:hms}':x=8:y=8:fontsize=20:fontcolor=white:borderw=2:bordercolor=black,tile=4x3:padding=4:margin=4" \
-              -frames:v 3 -q:v 2 "output/sheets/${B}_sheet_%02d.jpg" || true
+            ffmpeg -y -hide_banner -loglevel error -i "$F" -vf "fps=1/2,scale=480:-2,drawtext=fontfile=${FONT}:text='%{pts\\:hms}':x=8:y=8:fontsize=20:fontcolor=white:borderw=2:bordercolor=black,tile=4x3:padding=4:margin=4" -q:v 2 "output/sheets/${B}_sheet_%02d.jpg" || true
           done
 
       - name: Upload current motion pack
         uses: actions/upload-artifact@v4
         with:
           name: TiHiY-New-RSI-Motion-Pack
-          path: output/*
+          path: output/**
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
