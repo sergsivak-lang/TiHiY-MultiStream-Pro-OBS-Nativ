@@ -29,13 +29,10 @@ jobs:
           set -euo pipefail
           BASHER_URL='https://media.robertsspaceindustries.com/mhnviqz32lc2i/source.mp4'
           TYILUI_URL='https://media.robertsspaceindustries.com/pahuti3et7hie/source.mp4'
-
           printf '%s\n' "$BASHER_URL" > output/meta/basher_source_url.txt
           printf '%s\n' "$TYILUI_URL" > output/meta/tyilui_source_url.txt
-
           curl -fL --retry 8 --retry-delay 2 --connect-timeout 20 -A 'Mozilla/5.0' "$BASHER_URL" -o output/videos/basher.mp4
           curl -fL --retry 8 --retry-delay 2 --connect-timeout 20 -A 'Mozilla/5.0' "$TYILUI_URL" -o output/videos/tyilui.mp4
-
           for F in output/videos/*.mp4; do
             B=$(basename "$F" .mp4)
             ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate -show_entries format=duration,size -of json "$F" > "output/meta/${B}_info.json"
@@ -81,28 +78,33 @@ jobs:
           python -m pip install edge-tts
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          mkdir -p voice/raw voice/processed
+          mkdir -p voice/raw voice/processed voice/text
 
       - name: Generate Ukrainian male narration
         shell: bash
         run: |
-          cat > voice/lines.tsv <<'EOF'
-          1	У дві тисячі дев'ятсот п'ятдесят шостому році людство вже не дивиться на зорі знизу. Воно живе серед них. Кожна система тут приховує нові світи, нові маршрути і нові небезпеки.
-          2	Цей всесвіт створюють кораблі. Робертс Спейс Індастріз. Енвіл Аероспейс. Ейджіс Дайнемікс. Дрейк Інтерпленетарі. Міск. Оріджин Джампворкс. Крусейдер Індастріз. Арго. Консолідейтед Аутленд. І навіть екзотичні кораблі Гатак.
-          3	Та не всі шукають слави у вогні. Хтось добуває руду серед холодних астероїдів. Хтось ріже мертві корпуси на метал. Майнінг і сальважинг годують цілі станції та перетворюють уламки на нове життя.
-          4	Контракти ведуть у покинуті комплекси, на далекі планети і в темні коридори кораблів. Тут кожні двері можуть бути пасткою, а кожен сигнал — початком нової історії.
-          5	Але чим далі ти йдеш, тим менше залишається безпечних маршрутів. Небо наповнюється слідами двигунів. Радари ловлять чужі цілі. І тиша перед боєм стає голоснішою за сирени.
-          6	Коли переговори закінчуються, говорять гармати. Пілот виживає не завдяки броні. Він виживає завдяки досвіду, холодній голові і рішенню, прийнятому за частку секунди.
-          7	Ми не спостерігаємо за всесвітом.
-          8	Ми залишаємо в ньому свій слід.
-          EOF
-          sed -i 's/^          //' voice/lines.tsv
-          while IFS=$'\t' read -r N TEXT; do
+          python3 - <<'PY'
+          from pathlib import Path
+          lines = [
+              "У дві тисячі дев'ятсот п'ятдесят шостому році людство вже не дивиться на зорі знизу. Воно живе серед них. Кожна система тут приховує нові світи, нові маршрути і нові небезпеки.",
+              "Цей всесвіт створюють кораблі. Робертс Спейс Індастріз. Енвіл Аероспейс. Ейджіс Дайнемікс. Дрейк Інтерпленетарі. Міск. Оріджин Джампворкс. Крусейдер Індастріз. Арго. Консолідейтед Аутленд. І навіть екзотичні кораблі Гатак.",
+              "Та не всі шукають слави у вогні. Хтось добуває руду серед холодних астероїдів. Хтось ріже мертві корпуси на метал. Майнінг і сальважинг годують цілі станції та перетворюють уламки на нове життя.",
+              "Контракти ведуть у покинуті комплекси, на далекі планети і в темні коридори кораблів. Тут кожні двері можуть бути пасткою, а кожен сигнал — початком нової історії.",
+              "Але чим далі ти йдеш, тим менше залишається безпечних маршрутів. Небо наповнюється слідами двигунів. Радари ловлять чужі цілі. І тиша перед боєм стає голоснішою за сирени.",
+              "Коли переговори закінчуються, говорять гармати. Пілот виживає не завдяки броні. Він виживає завдяки досвіду, холодній голові і рішенню, прийнятому за частку секунди.",
+              "Ми не спостерігаємо за всесвітом.",
+              "Ми залишаємо в ньому свій слід."
+          ]
+          for i, text in enumerate(lines, 1):
+              Path(f'voice/text/line{i}.txt').write_text(text, encoding='utf-8')
+          PY
+          for N in $(seq 1 8); do
+            TEXT=$(cat "voice/text/line${N}.txt")
             edge-tts --voice uk-UA-OstapNeural --rate='-17%' --pitch='-10Hz' --text "$TEXT" --write-media "voice/raw/line${N}.mp3"
             ffmpeg -y -hide_banner -loglevel error -i "voice/raw/line${N}.mp3" \
               -af "asetrate=24000*0.93,aresample=48000,atempo=1.02,highpass=f=55,bass=g=8:f=100,treble=g=-2.5:f=2800,acompressor=threshold=-21dB:ratio=3.5:attack=18:release=240,aecho=0.8:0.32:26:0.05,alimiter=limit=0.94" \
               "voice/processed/line${N}.wav"
-          done < voice/lines.tsv
+          done
 
       - name: Build narration timeline
         shell: bash
