@@ -13,26 +13,27 @@ jobs:
   capture:
     if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[BROWSERCAP]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - name: Install capture tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg curl python3 python3-pip
-          python3 -m pip install -U selenium
+          python3 -m pip install -U selenium --break-system-packages
           google-chrome --version || google-chrome-stable --version || chromium --version
           mkdir -p output
 
-      - name: Open official videos in Chrome and capture media requests
+      - name: Open normal official YouTube watch pages and capture media requests
         shell: bash
         run: |
           set -euo pipefail
           cat > capture.py <<'PY'
-          import json, time, os
+          import json, time
           from pathlib import Path
           from selenium import webdriver
           from selenium.webdriver.chrome.options import Options
+          from selenium.webdriver.common.by import By
 
           videos = {
               'basher':'whpBNeYsJQA',
@@ -41,7 +42,7 @@ jobs:
               'railen':'Xh35kuWo0a4',
           }
 
-          for name, vid in videos.items():
+          def make_driver():
               opts=Options()
               opts.add_argument('--headless=new')
               opts.add_argument('--no-sandbox')
@@ -50,43 +51,70 @@ jobs:
               opts.add_argument('--window-size=1920,1080')
               opts.add_argument('--disable-blink-features=AutomationControlled')
               opts.add_argument('--lang=en-US')
+              opts.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36')
               opts.set_capability('goog:loggingPrefs', {'performance':'ALL','browser':'ALL'})
-              driver=webdriver.Chrome(options=opts)
+              return webdriver.Chrome(options=opts)
+
+          for name, vid in videos.items():
+              driver=make_driver()
               try:
-                  url=f'https://www.youtube.com/embed/{vid}?autoplay=1&mute=1&controls=1&playsinline=1'
+                  driver.get('https://www.youtube.com/')
+                  driver.add_cookie({'name':'SOCS','value':'CAI','domain':'.youtube.com','path':'/'})
+                  driver.add_cookie({'name':'PREF','value':'hl=en&gl=US','domain':'.youtube.com','path':'/'})
+                  url=f'https://www.youtube.com/watch?v={vid}&autoplay=1'
                   driver.get(url)
-                  time.sleep(12)
-                  driver.save_screenshot(f'output/{name}_player.png')
-                  Path(f'output/{name}_title.txt').write_text(driver.title or '')
+                  time.sleep(7)
+
+                  # Dismiss common consent/dialog overlays if present.
+                  for text in ['Accept all','Reject all','I agree','No thanks','Dismiss']:
+                      try:
+                          els=driver.find_elements(By.XPATH, f"//*[self::button or @role='button'][contains(normalize-space(.), '{text}')]")
+                          if els:
+                              driver.execute_script('arguments[0].click()', els[0]); time.sleep(1)
+                      except Exception:
+                          pass
+
+                  # Start/mute the real HTML5 player when available.
                   try:
-                      state=driver.execute_script("return document.querySelector('video') ? {src:document.querySelector('video').currentSrc, ready:document.querySelector('video').readyState, duration:document.querySelector('video').duration, paused:document.querySelector('video').paused, error:document.querySelector('video').error && document.querySelector('video').error.message} : null")
+                      driver.execute_script("const v=document.querySelector('video'); if(v){v.muted=true; v.volume=0; v.play().catch(()=>{});}")
+                  except Exception:
+                      pass
+                  time.sleep(14)
+                  driver.save_screenshot(f'output/{name}_watch.png')
+                  Path(f'output/{name}_title.txt').write_text(driver.title or '')
+                  Path(f'output/{name}_body_head.txt').write_text((driver.find_element(By.TAG_NAME,'body').text or '')[:12000])
+
+                  try:
+                      state=driver.execute_script("return document.querySelector('video') ? {src:document.querySelector('video').currentSrc, ready:document.querySelector('video').readyState, duration:document.querySelector('video').duration, currentTime:document.querySelector('video').currentTime, paused:document.querySelector('video').paused, error:document.querySelector('video').error && document.querySelector('video').error.message} : null")
                   except Exception as e:
                       state={'error':str(e)}
                   Path(f'output/{name}_video_state.json').write_text(json.dumps(state,indent=2,default=str))
 
-                  media=[]
-                  all_urls=[]
+                  media=[]; all_urls=[]
                   for entry in driver.get_log('performance'):
                       try:
                           msg=json.loads(entry['message'])['message']
                           if msg.get('method')!='Network.responseReceived': continue
-                          r=msg['params']['response']
-                          u=r.get('url','')
+                          r=msg['params']['response']; u=r.get('url',''); mime=r.get('mimeType','')
                           if u: all_urls.append(u)
-                          mime=r.get('mimeType','')
                           if 'googlevideo.com/videoplayback' in u or mime.startswith('video/') or mime.startswith('audio/'):
                               media.append({'url':u,'mimeType':mime,'status':r.get('status'),'headers':r.get('headers',{})})
                       except Exception:
                           pass
-                  Path(f'output/{name}_media.json').write_text(json.dumps(media,indent=2))
+                  # Deduplicate preserving order.
+                  seen=set(); uniq=[]
+                  for m in media:
+                      key=m['url']
+                      if key not in seen: uniq.append(m); seen.add(key)
+                  Path(f'output/{name}_media.json').write_text(json.dumps(uniq,indent=2))
                   Path(f'output/{name}_all_urls.txt').write_text('\n'.join(all_urls))
-                  print(name, 'media responses:', len(media), 'video state:', state)
+                  print(name, 'title=', driver.title, 'media=',len(uniq),'state=',state)
               finally:
                   driver.quit()
           PY
           python3 capture.py
-          find output -maxdepth 1 -type f -printf '%f %s bytes\n'
-          for F in output/*_media.json; do echo "==== $F"; grep -o 'https[^" ]*googlevideo[^" ]*' "$F" | head -5 || true; done
+          find output -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+          for F in output/*_video_state.json; do echo "==== $F"; cat "$F"; done
 
       - name: Upload captured media metadata
         uses: actions/upload-artifact@v4
