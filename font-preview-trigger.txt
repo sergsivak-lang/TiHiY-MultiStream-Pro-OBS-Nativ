@@ -1,1 +1,2 @@
 Render exact typography previews for Orbitron, Tektur, Unbounded and Exo 2.
+Retry with local sci-fi HUD background.
