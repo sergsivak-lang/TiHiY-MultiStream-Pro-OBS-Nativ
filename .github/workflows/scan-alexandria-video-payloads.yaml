@@ -1,0 +1,63 @@
+name: Scan Alexandria Video Payloads
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[ALEXSCAN]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch Alexandria rendered payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          declare -A URLS=(
+            [basher]='https://robertsspaceindustries.com/alexandria/html/6a51096c516eb54698c9d494/6a590edd9594f1dc204ba133/fiXkgIwpyIWIpejLZss7H-O6hNo-en'
+            [patch49]='https://robertsspaceindustries.com/alexandria/html/6a427a9c7050b1db012268c6/6a4fc23f3e639ddfa37199ff/r1K8cW87FgjU7r6ELazoZHKS_nU-en'
+            [tyilui]='https://robertsspaceindustries.com/alexandria/html/6a3040fcef68a28490f5002e/6a31bc1dd40b62ae8229e8b4/sfUIwLwk2PDgbm-0TqDznsrBUXk-en'
+            [railen]='https://robertsspaceindustries.com/alexandria/html/6a29c6a16babcb8cdeff8703/6a2ab4926babcb8cdeff8782/RgxHBI1sMvKMr879FLEr9Ee8v5Q-en'
+          )
+          for K in basher patch49 tyilui railen; do
+            curl -fL --compressed --retry 5 --retry-delay 2 \
+              -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36' \
+              "${URLS[$K]}" -o "output/${K}_alexandria.html"
+          done
+
+      - name: Extract actual video identifiers and asset URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, html, json
+          from pathlib import Path
+          for p in Path('output').glob('*_alexandria.html'):
+              raw=p.read_text(errors='ignore')
+              s=html.unescape(raw).replace('\\/','/')
+              found={
+                  'youtube_ids': sorted(set(re.findall(r'(?:youtube(?:-nocookie)?\.com/(?:embed/|watch\?v=)|youtu\.be/)([A-Za-z0-9_-]{11})',s))),
+                  'vimeo_ids': sorted(set(re.findall(r'vimeo\.com/(?:video/)?([0-9]{6,12})',s))),
+                  'mp4_urls': sorted(set(re.findall(r'https?://[^"\'<> ]+\.mp4(?:\?[^"\'<> ]*)?',s,re.I))),
+                  'media_urls': sorted(set(re.findall(r'https?://media\.robertsspaceindustries\.com/[^"\'<> ]+',s,re.I))),
+              }
+              Path(str(p).replace('.html','_extract.json')).write_text(json.dumps(found,indent=2))
+              print(p.name, json.dumps(found))
+          PY
+          grep -RniE 'video_id|youtube|vimeo|\.mp4|distant_source|media.robert' output || true
+
+      - name: Upload Alexandria scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-Alexandria-Video-Payload-Scan
+          path: output/*
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
