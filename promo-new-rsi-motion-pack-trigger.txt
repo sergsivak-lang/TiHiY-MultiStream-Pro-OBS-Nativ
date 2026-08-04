@@ -1,2 +1,2 @@
-Discover and download current official motion assets for Basher, Frontier Tensions, Gatac Tyilui and Gatac Railen. No old promo footage.
-Retry after fixing single-line media URL downloads.
+Build the new promo only from verified current official RSI CDN motion sources.
+Use direct Basher and Gatac Tyilui source.mp4 assets; do not use old Tactical Strike, DefenseCon or Foundation footage.
