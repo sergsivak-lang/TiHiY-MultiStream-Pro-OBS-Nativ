@@ -1,0 +1,84 @@
+name: Extract New RSI Video Assets
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[RSIASSET]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl python3
+          mkdir -p pages output
+
+      - name: Fetch official RSI Comm-Link pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A PAGES=(
+            [basher]='https://robertsspaceindustries.com/en/comm-link/transmission/21247-Behind-The-Ships'
+            [patch49]='https://robertsspaceindustries.com/en/comm-link/transmission/21228-Inside-Star-Citizen'
+            [tyilui]='https://robertsspaceindustries.com/en/comm-link/transmission/21214-Behind-The-Ships'
+            [railen]='https://robertsspaceindustries.com/en/comm-link/transmission/21207-Behind-The-Ships'
+          )
+          for K in basher patch49 tyilui railen; do
+            URL="${PAGES[$K]}"
+            echo "$K $URL"
+            curl -fL --compressed --retry 5 --retry-delay 2 \
+              -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36' \
+              "$URL" -o "pages/${K}.html"
+            cp "pages/${K}.html" "output/${K}.html"
+          done
+
+      - name: Extract media URLs and embedded data
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, html, json
+          from pathlib import Path
+          for p in Path('pages').glob('*.html'):
+              text=p.read_text(errors='ignore')
+              decoded=html.unescape(text).replace('\\/','/')
+              urls=[]
+              patterns=[
+                  r'https?://[^"\'<>\\ ]+',
+                  r'//media\.robertsspaceindustries\.com/[^"\'<>\\ ]+',
+                  r'//static\.robertsspaceindustries\.com/[^"\'<>\\ ]+',
+              ]
+              for pat in patterns:
+                  urls += re.findall(pat, decoded)
+              keep=[]
+              for u in urls:
+                  if any(x in u.lower() for x in ['media.robertsspaceindustries.com','static.robertsspaceindustries.com','.mp4','youtube.com','youtu.be','video']):
+                      u=u.rstrip('),;]')
+                      if u not in keep: keep.append(u)
+              Path(f'output/{p.stem}_urls.txt').write_text('\n'.join(keep))
+              # Also dump lines around likely media keys.
+              snippets=[]
+              for m in re.finditer(r'(?i)(video|youtube|media|source\.mp4|mp4)', decoded):
+                  a=max(0,m.start()-350); b=min(len(decoded),m.end()+600)
+                  snippets.append(decoded[a:b])
+                  if len(snippets)>=120: break
+              Path(f'output/{p.stem}_snippets.txt').write_text('\n\n---\n\n'.join(snippets))
+          PY
+          for F in output/*_urls.txt; do echo "===== $F ====="; cat "$F"; done
+
+      - name: Upload extracted RSI asset data
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-New-RSI-Video-Asset-Extraction
+          path: output/*
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
