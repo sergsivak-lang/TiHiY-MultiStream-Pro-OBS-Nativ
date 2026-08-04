@@ -1,1 +1,2 @@
 Run direct Ukrainian neural narration workflow for final extended promo.
+Use the recognized motion-pack workflow voice job.
