@@ -1,0 +1,148 @@
+name: Fetch New Official Star Citizen Videos via Invidious
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[INVFETCH]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl python3
+          mkdir -p work output
+
+      - name: Resolve and download official video streams through public Invidious instances
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          cat > fetch.py <<'PY'
+          import json, subprocess, urllib.parse, pathlib, sys, os
+
+          videos = {
+              'basher':'whpBNeYsJQA',
+              'patch49':'OX__JZULs-Y',
+              'tyilui':'oulQmbwN87M',
+              'railen':'Xh35kuWo0a4',
+          }
+          instances = [
+              'https://yt.chocolatemoo53.com',
+              'https://invidious.tiekoetter.com',
+              'https://invidious.nerdvpn.de',
+              'https://invidious.f5.si',
+              'https://inv.zoomerville.com',
+          ]
+
+          def curl_json(url):
+              p=subprocess.run(['curl','-A','Mozilla/5.0','-fsSL','--retry','2','--connect-timeout','15','--max-time','45',url],capture_output=True,text=True)
+              if p.returncode: return None
+              try:
+                  d=json.loads(p.stdout)
+                  return d if isinstance(d,dict) else None
+              except Exception:
+                  return None
+
+          def abs_url(instance,u):
+              if u.startswith('//'): return 'https:'+u
+              if u.startswith('/'): return instance+u
+              return u
+
+          for name, vid in videos.items():
+              data=None; inst=None
+              for base in instances:
+                  for suffix in ('?local=true',''):
+                      url=f'{base}/api/v1/videos/{vid}{suffix}'
+                      d=curl_json(url)
+                      if d and d.get('videoId')==vid and (d.get('adaptiveFormats') or d.get('formatStreams')):
+                          data=d; inst=base; break
+                  if data: break
+              if not data:
+                  raise SystemExit(f'No Invidious instance returned streams for {name} {vid}')
+              pathlib.Path(f'../output/{name}_api.json').write_text(json.dumps(data,indent=2))
+              print(name,'resolved through',inst,'title=',data.get('title'))
+
+              formats=data.get('adaptiveFormats') or []
+              vids=[]; auds=[]
+              for f in formats:
+                  u=f.get('url')
+                  if not u: continue
+                  typ=(f.get('type') or '').lower()
+                  cont=(f.get('container') or '').lower()
+                  q=f.get('qualityLabel') or ''
+                  if typ.startswith('video/') or q:
+                      h=f.get('height') or 0
+                      if not h:
+                          import re
+                          m=re.search(r'(\d{3,4})p',q)
+                          h=int(m.group(1)) if m else 0
+                      if h and h<=1440:
+                          score=(1 if ('mp4' in typ or cont=='mp4') else 0,h,f.get('fps') or 0,f.get('bitrate') or 0)
+                          vids.append((score,abs_url(inst,u),f))
+                  elif typ.startswith('audio/') or f.get('audioQuality'):
+                      score=(1 if ('mp4' in typ or cont in ('m4a','mp4')) else 0,f.get('bitrate') or 0)
+                      auds.append((score,abs_url(inst,u),f))
+
+              if not vids:
+                  # Progressive streams fallback.
+                  for f in data.get('formatStreams') or []:
+                      u=f.get('url'); q=f.get('qualityLabel') or f.get('quality') or ''
+                      if not u: continue
+                      import re
+                      m=re.search(r'(\d{3,4})p',q); h=int(m.group(1)) if m else 0
+                      if h and h<=1440:
+                          vids.append(((1,h,0,0),abs_url(inst,u),f))
+
+              if not vids: raise SystemExit(f'No usable video format for {name}')
+              vids.sort(key=lambda x:x[0],reverse=True)
+              vurl=vids[0][1]
+              vfmt=vids[0][2]
+              pathlib.Path(f'../output/{name}_selected_video.txt').write_text(json.dumps(vfmt,indent=2)+'\n'+vurl+'\n')
+
+              # Download chosen stream using the exact user-agent/referer that public proxies tolerate.
+              subprocess.run(['curl','-fL','--retry','5','--retry-delay','2','-A','Mozilla/5.0','-e',inst+'/',vurl,'-o',f'{name}_video.bin'],check=True)
+
+              if auds:
+                  auds.sort(key=lambda x:x[0],reverse=True)
+                  aurl=auds[0][1]; afmt=auds[0][2]
+                  pathlib.Path(f'../output/{name}_selected_audio.txt').write_text(json.dumps(afmt,indent=2)+'\n'+aurl+'\n')
+                  subprocess.run(['curl','-fL','--retry','5','--retry-delay','2','-A','Mozilla/5.0','-e',inst+'/',aurl,'-o',f'{name}_audio.bin'],check=True)
+                  subprocess.run(['ffmpeg','-y','-hide_banner','-loglevel','error','-i',f'{name}_video.bin','-i',f'{name}_audio.bin','-map','0:v:0','-map','1:a:0','-c','copy',f'{name}.mp4'],check=True)
+              else:
+                  # Progressive format might already contain audio.
+                  subprocess.run(['ffmpeg','-y','-hide_banner','-loglevel','error','-i',f'{name}_video.bin','-c','copy',f'{name}.mp4'],check=True)
+
+              subprocess.run(['ffprobe','-v','error','-show_entries','format=duration,size:stream=codec_type,codec_name,width,height,r_frame_rate','-of','json',f'{name}.mp4'],stdout=open(f'../output/{name}_info.json','w'),check=True)
+          PY
+          python3 fetch.py
+
+      - name: Create timestamped contact sheets from the four new official videos
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          FONT='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+          for K in basher patch49 tyilui railen; do
+            ffmpeg -y -hide_banner -loglevel error -i "${K}.mp4" \
+              -vf "fps=1/3,scale=480:-2,drawtext=fontfile=${FONT}:text='%{pts\\:hms}':x=8:y=8:fontsize=22:fontcolor=white:borderw=2:bordercolor=black,tile=4x4:padding=4:margin=4" \
+              -q:v 2 -vsync vfr "../output/${K}_sheet_%02d.jpg"
+          done
+
+      - name: Upload new-source scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-New-Official-Invidious-Scan
+          path: output/*
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
