@@ -1,0 +1,90 @@
+name: Scan New Official Star Citizen Videos
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[NEWSCAN]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg python3 python3-pip
+          python3 -m pip install -U yt-dlp
+          mkdir -p work output
+
+      - name: Find and download new official Star Citizen videos
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          cat > find_official.py <<'PY'
+          import json, subprocess, sys
+
+          queries = {
+              'basher': "Star Citizen Behind the Ships Grey's Market Basher",
+              'patch49': 'Inside Star Citizen Alpha 4.9 Patch Report',
+              'tyilui': 'Star Citizen Behind the Ships Gatac Tyilui',
+              'railen': 'Star Citizen Behind the Ships Gatac Railen',
+          }
+
+          for key, query in queries.items():
+              p = subprocess.run(['yt-dlp','--dump-single-json',f'ytsearch8:{query}'], capture_output=True, text=True, check=True)
+              data = json.loads(p.stdout)
+              entries = data.get('entries') or []
+              chosen = None
+              for e in entries:
+                  channel = (e.get('channel') or e.get('uploader') or '').strip().lower()
+                  title = (e.get('title') or '').lower()
+                  if channel == 'star citizen' and 'star citizen' in title:
+                      chosen = e
+                      break
+              if not chosen:
+                  for e in entries:
+                      channel = (e.get('channel') or e.get('uploader') or '').strip().lower()
+                      if channel == 'star citizen':
+                          chosen = e
+                          break
+              if not chosen:
+                  raise SystemExit(f'No official Star Citizen result for: {query}')
+              url = chosen.get('webpage_url') or chosen.get('url')
+              print(f'{key}|{chosen.get("title")}|{chosen.get("channel") or chosen.get("uploader")}|{url}')
+              subprocess.run([
+                  'yt-dlp','--no-playlist','--ffmpeg-location','/usr/bin',
+                  '-f','bv*[height<=1440]+ba/b[height<=1440]',
+                  '--merge-output-format','mp4','-o',f'{key}.mp4',url
+              ], check=True)
+          PY
+          python3 find_official.py | tee ../output/SOURCES.txt
+
+      - name: Validate and make timestamped contact sheets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          FONT='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+          for F in basher patch49 tyilui railen; do
+            ffprobe -v error -show_entries format=duration,size:stream=codec_type,codec_name,width,height,r_frame_rate -of json "${F}.mp4" > "../output/${F}_info.json"
+            ffmpeg -y -hide_banner -loglevel error -i "${F}.mp4" \
+              -vf "fps=1/4,scale=480:-2,drawtext=fontfile=${FONT}:text='%{pts\\:hms}':x=8:y=8:fontsize=22:fontcolor=white:borderw=2:bordercolor=black,tile=4x4:padding=4:margin=4" \
+              -q:v 2 -vsync vfr "../output/${F}_sheet_%02d.jpg"
+          done
+
+      - name: Upload scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-New-Official-Star-Citizen-Scan
+          path: output/*
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
