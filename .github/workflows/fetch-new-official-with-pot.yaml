@@ -21,8 +21,8 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ffmpeg python3 python3-pip docker.io
-          python3 -m pip install -U --pre yt-dlp bgutil-ytdlp-pot-provider
+          sudo apt-get install -y ffmpeg python3 python3-pip
+          python3 -m pip install -U --pre yt-dlp bgutil-ytdlp-pot-provider --break-system-packages
           mkdir -p work output
           yt-dlp --version
           docker --version
@@ -31,11 +31,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo docker rm -f bgutil-provider 2>/dev/null || true
           sudo docker pull brainicism/bgutil-ytdlp-pot-provider:latest
           sudo docker run --name bgutil-provider -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider:latest
-          sleep 6
+          sleep 8
           sudo docker ps
-          sudo docker logs bgutil-provider --tail 50 || true
+          sudo docker logs bgutil-provider --tail 80 || true
+          curl -fsS --max-time 10 http://127.0.0.1:4416/ >/dev/null || true
 
       - name: Download four newly selected official 2026 Star Citizen videos
         shell: bash
@@ -63,7 +65,7 @@ jobs:
               -of json "${K}.mp4" > "../output/${K}_info.json"
           done
 
-      - name: Verify official titles and create timestamped contact sheets
+      - name: Create timestamped contact sheets from the four new official videos
         shell: bash
         run: |
           set -euo pipefail
