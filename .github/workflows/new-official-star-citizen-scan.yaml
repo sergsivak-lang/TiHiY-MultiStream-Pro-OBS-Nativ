@@ -23,7 +23,7 @@ jobs:
           python3 -m pip install -U yt-dlp
           mkdir -p work output
 
-      - name: Read newest uploads from official Star Citizen channel RSS
+      - name: Confirm newest uploads from official Star Citizen RSS
         shell: bash
         run: |
           set -euo pipefail
@@ -31,41 +31,35 @@ jobs:
           CHANNEL_ID='UCTeLqJq1mXUX5WWoNXLmOIA'
           curl -fL --retry 5 --retry-delay 2 "https://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL_ID}" -o official_feed.xml
           cp official_feed.xml ../output/OFFICIAL_FEED.xml
-
-          cat > select_latest.py <<'PY'
+          python3 - <<'PY'
           import xml.etree.ElementTree as ET
           from pathlib import Path
-
-          ns = {
-              'atom':'http://www.w3.org/2005/Atom',
-              'yt':'http://www.youtube.com/xml/schemas/2015'
-          }
-          root = ET.parse('official_feed.xml').getroot()
+          ns={'atom':'http://www.w3.org/2005/Atom','yt':'http://www.youtube.com/xml/schemas/2015'}
+          root=ET.parse('official_feed.xml').getroot()
           rows=[]
-          for e in root.findall('atom:entry', ns):
-              title=(e.findtext('atom:title', default='', namespaces=ns) or '').strip()
-              vid=(e.findtext('yt:videoId', default='', namespaces=ns) or '').strip()
-              published=(e.findtext('atom:published', default='', namespaces=ns) or '').strip()
+          for e in root.findall('atom:entry',ns):
+              title=(e.findtext('atom:title',default='',namespaces=ns) or '').strip()
+              vid=(e.findtext('yt:videoId',default='',namespaces=ns) or '').strip()
+              published=(e.findtext('atom:published',default='',namespaces=ns) or '').strip()
               rows.append((published,title,vid))
-          Path('../output/FEED_LIST.txt').write_text('\n'.join(f'{d}|{t}|https://www.youtube.com/watch?v={v}' for d,t,v in rows))
-
-          preferred=[]
-          for row in rows:
-              low=row[1].lower()
-              if any(k in low for k in ['behind the ships','inside star citizen','alpha 4.9','frontier','foundation','star citizen |']):
-                  preferred.append(row)
-          chosen=(preferred+rows)[:6]
-          seen=set(); final=[]
-          for r in chosen:
-              if r[2] and r[2] not in seen:
-                  final.append(r); seen.add(r[2])
-              if len(final)==4: break
-          if len(final)<4:
-              raise SystemExit('Official RSS did not contain four usable videos')
-          Path('selected.txt').write_text('\n'.join(f'{i}|{d}|{t}|{v}' for i,(d,t,v) in enumerate(final)))
-          Path('../output/SELECTED.txt').write_text(Path('selected.txt').read_text())
+          Path('../output/FEED_LIST.txt').write_text('\n'.join(f'{d}\t{v}\t{t}' for d,t,v in rows))
+          required={
+              'whpBNeYsJQA': 'Grey’s Market Basher',
+              'OX__JZULs-Y': 'Alpha 4.9 Patch Report',
+              'oulQmbwN87M': 'Gatac Tyilui',
+              'Xh35kuWo0a4': 'Gatac Railen',
+          }
+          present={v for _,_,v in rows}
+          missing=[v for v in required if v not in present]
+          if missing:
+              raise SystemExit('Expected official videos missing from RSS: '+','.join(missing))
+          Path('../output/SELECTED.txt').write_text('\n'.join([
+              '0\t2026-07-16\twhpBNeYsJQA\tStar Citizen | Behind the Ships: Grey’s Market Basher',
+              '1\t2026-07-09\tOX__JZULs-Y\tInside Star Citizen | Alpha 4.9 Patch Report',
+              '2\t2026-06-17\toulQmbwN87M\tStar Citizen | Behind the Ships: Gatac Tyilui',
+              '3\t2026-06-11\tXh35kuWo0a4\tStar Citizen | Behind the Ships: Gatac Railen',
+          ]))
           PY
-          python3 select_latest.py
           cat ../output/SELECTED.txt
 
       - name: Download selected newest official videos
@@ -73,14 +67,15 @@ jobs:
         run: |
           set -euo pipefail
           cd work
-          while IFS='|' read -r IDX DATE TITLE VID; do
+          while IFS=$'\t' read -r IDX DATE VID TITLE; do
             URL="https://www.youtube.com/watch?v=${VID}"
             echo "Downloading official source ${IDX}: ${TITLE} (${DATE}) ${URL}"
             yt-dlp --no-playlist --ffmpeg-location /usr/bin \
-              --extractor-args 'youtube:player_client=tv_embedded,web_safari' \
+              --extractor-args 'youtube:player_client=tv_embedded,web_safari,android_vr' \
+              --retries 5 --fragment-retries 5 \
               -f 'bv*[height<=1440]+ba/b[height<=1440]' \
               --merge-output-format mp4 -o "new${IDX}.mp4" "$URL"
-          done < selected.txt
+          done < ../output/SELECTED.txt
 
       - name: Validate and make timestamped contact sheets
         shell: bash
