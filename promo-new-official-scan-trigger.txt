@@ -1,0 +1,2 @@
+Scan newest official 2026 Star Citizen videos directly from verified channel RSS.
+Retry: exact official video IDs with fixed parsing.
