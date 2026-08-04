@@ -1,2 +1,3 @@
 Run direct Ukrainian neural narration workflow for final extended promo.
 Use the recognized motion-pack workflow voice job.
+Input parsing fixed; generate final artifact now.
