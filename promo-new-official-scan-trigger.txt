@@ -1,1 +1,2 @@
-Scan newly found official 2026 Star Citizen videos for a completely new clean promo edit.
+Scan newest official 2026 Star Citizen videos directly from the verified channel RSS feed.
+Retry: official RSS source selection.
