@@ -1,1 +1,2 @@
 Fetch only the newly selected official 2026 Star Citizen videos using the current PO-token provider method.
+Retry after removing duplicate Docker installation from the GitHub runner.
