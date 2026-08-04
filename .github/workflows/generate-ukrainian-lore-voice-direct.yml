@@ -5,6 +5,9 @@ on:
     branches: [master]
     paths:
       - voice-trigger-direct.txt
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -13,6 +16,7 @@ permissions:
 
 jobs:
   voice:
+    if: github.event_name == 'push' || contains(github.event.pull_request.title, '[VOICE-DIRECT]')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
