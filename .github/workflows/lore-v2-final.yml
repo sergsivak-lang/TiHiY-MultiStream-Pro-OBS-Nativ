@@ -1,0 +1,169 @@
+name: Render Star Citizen Lore V2
+
+on:
+  pull_request_target:
+    branches: [master]
+    paths:
+      - lore-v2-final-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Report render run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "LORE V2 RENDER RUN $GITHUB_RUN_ID" --body "Final Star Citizen lore V2 render started. Ukrainian battle-worn veteran narration, custom epic music, steel UA/EN captions. Run ID: $GITHUB_RUN_ID"
+
+      - name: Checkout render scripts
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl python3-pip
+          python3 -m pip install --break-system-packages -q edge-tts pillow numpy
+          mkdir -p work/fonts work/assets work/sources work/voice_raw work/voice_proc work/scenes output
+          curl -fL --retry 6 --retry-delay 2 'https://github.com/google/fonts/raw/main/ofl/tektur/Tektur%5Bwdth%2Cwght%5D.ttf' -o work/fonts/Tektur.ttf
+
+      - name: Download official Star Citizen moving footage
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work/sources
+          curl -fL --retry 15 --retry-all-errors --retry-delay 2 -C - 'https://media.robertsspaceindustries.com/in35u0wsdl5ys/source.mp4' -o tactical.mp4
+          curl -fL --retry 15 --retry-all-errors --retry-delay 2 -C - 'https://media.robertsspaceindustries.com/ek2roy7yuiw58/source.mp4' -o defensecon.mp4
+          curl -fL --retry 15 --retry-all-errors --retry-delay 2 -C - 'https://media.robertsspaceindustries.com/4tsoif8ccdaiq/source.mp4' -o foundation.mp4
+          curl -fL --retry 15 --retry-all-errors --retry-delay 2 -C - 'https://media.robertsspaceindustries.com/9vuck22dgycnl/source.mp4' -o recent_rsi.mp4
+          for F in *.mp4; do ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$F" | grep -q .; done
+
+      - name: Generate steel captions and epic music
+        run: |
+          python3 promo/lore_v2/make_assets.py work/assets work/fonts/Tektur.ttf
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/assets/music.wav
+
+      - name: Generate Ukrainian veteran narration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import asyncio
+          from pathlib import Path
+          import edge_tts
+          async def main():
+              assets=Path('work/assets')
+              raw=Path('work/voice_raw')
+              for i in range(1,12):
+                  text=(assets/f'voice_{i:02d}.txt').read_text(encoding='utf-8').strip()
+                  c=edge_tts.Communicate(text, voice='uk-UA-OstapNeural', rate='-16%', pitch='-24Hz', volume='+4%')
+                  await c.save(str(raw/f'voice_{i:02d}.mp3'))
+          asyncio.run(main())
+          PY
+
+          for I in $(seq -w 1 11); do
+            ffmpeg -y -hide_banner -loglevel error -i "work/voice_raw/voice_${I}.mp3" -filter_complex "[0:a]aresample=48000,asetrate=42240,aresample=48000,atempo=1.13636,highpass=f=45,lowpass=f=7200,asplit=3[a][b][c];[a]equalizer=f=90:t=q:w=1:g=7,equalizer=f=220:t=q:w=1.2:g=3,equalizer=f=3200:t=q:w=1:g=-2,acompressor=threshold=-20dB:ratio=4:attack=10:release=150,volume=1.30[core];[b]highpass=f=1200,lowpass=f=4300,tremolo=f=7:d=0.10,volume=0.12[rasp];[c]lowpass=f=190,volume=0.10[chest];[core][rasp][chest]amix=inputs=3:normalize=0,aecho=0.8:0.12:32:0.055,alimiter=limit=0.95[out]" -map '[out]' "work/voice_proc/tmp_${I}.wav"
+            D=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "work/voice_proc/tmp_${I}.wav")
+            R=$(awk -v d="$D" 'BEGIN{if(d>4.35) printf "%.5f",d/4.35; else print "1.0"}')
+            ffmpeg -y -hide_banner -loglevel error -i "work/voice_proc/tmp_${I}.wav" -af "atempo=${R},afade=t=in:st=0:d=0.04,afade=t=out:st=4.25:d=0.10" "work/voice_proc/voice_${I}.wav"
+          done
+
+      - name: Build scene-perfect story cuts
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCENE=5.2
+          make_scene() {
+            SRC="$1"; START="$2"; IDX="$3"; EXTRA="$4"
+            CAP="work/assets/caption_${IDX}.png"
+            OUT="work/scenes/scene_${IDX}.mp4"
+            if [ "$EXTRA" = 'title' ]; then
+              ffmpeg -y -hide_banner -loglevel error -ss "$START" -i "$SRC" -loop 1 -framerate 60 -i "$CAP" -loop 1 -framerate 60 -i work/assets/title.png -t "$SCENE" -filter_complex "[0:v]scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.07:saturation=1.10:brightness=-0.008:gamma=0.99,unsharp=5:5:0.34[base];[1:v]format=rgba,fade=t=in:st=0.25:d=0.25:alpha=1,fade=t=out:st=4.55:d=0.35:alpha=1[cap];[2:v]format=rgba,fade=t=in:st=0.12:d=0.28:alpha=1,fade=t=out:st=2.75:d=0.45:alpha=1[ttl];[base][cap]overlay=0:0[tmp];[tmp][ttl]overlay=0:0:enable='between(t,0.1,3.2)'[v]" -map '[v]' -an -c:v libx264 -preset veryfast -crf 17 -profile:v high -pix_fmt yuv420p "$OUT"
+            else
+              ffmpeg -y -hide_banner -loglevel error -ss "$START" -i "$SRC" -loop 1 -framerate 60 -i "$CAP" -t "$SCENE" -filter_complex "[0:v]scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.07:saturation=1.10:brightness=-0.008:gamma=0.99,unsharp=5:5:0.34[base];[1:v]format=rgba,fade=t=in:st=0.25:d=0.25:alpha=1,fade=t=out:st=4.55:d=0.35:alpha=1[cap];[base][cap]overlay=0:0[v]" -map '[v]' -an -c:v libx264 -preset veryfast -crf 17 -profile:v high -pix_fmt yuv420p "$OUT"
+            fi
+          }
+
+          make_scene work/sources/foundation.mp4 17.0 01 title
+          make_scene work/sources/tactical.mp4 0.0 02 normal
+          make_scene work/sources/defensecon.mp4 0.0 03 normal
+          make_scene work/sources/tactical.mp4 2.2 04 normal
+          make_scene work/sources/recent_rsi.mp4 4.8 05 normal
+          make_scene work/sources/foundation.mp4 0.0 06 normal
+          make_scene work/sources/tactical.mp4 14.0 07 normal
+          make_scene work/sources/tactical.mp4 4.6 08 normal
+          make_scene work/sources/defensecon.mp4 8.8 09 normal
+          make_scene work/sources/recent_rsi.mp4 0.0 10 normal
+          make_scene work/sources/tactical.mp4 11.5 11 normal
+
+          ffmpeg -y -hide_banner -loglevel error -ss 17.4 -i work/sources/foundation.mp4 -loop 1 -framerate 60 -i work/assets/brand.png -t 5.2 -filter_complex "[0:v]scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,fps=60,eq=contrast=1.06:saturation=1.08:brightness=-0.01:gamma=0.99[base];[1:v]format=rgba,fade=t=in:st=0.85:d=0.45:alpha=1,fade=t=out:st=4.55:d=0.40:alpha=1[brand];[base][brand]overlay=0:0[v]" -map '[v]' -an -c:v libx264 -preset veryfast -crf 17 -profile:v high -pix_fmt yuv420p work/scenes/scene_12.mp4
+
+      - name: Assemble cinematic video
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > work/xfade.txt <<'EOF'
+          [0:v][1:v]xfade=transition=fadeblack:duration=0.35:offset=4.85[v1];
+          [v1][2:v]xfade=transition=smoothleft:duration=0.35:offset=9.70[v2];
+          [v2][3:v]xfade=transition=zoomin:duration=0.35:offset=14.55[v3];
+          [v3][4:v]xfade=transition=wipeleft:duration=0.35:offset=19.40[v4];
+          [v4][5:v]xfade=transition=fade:duration=0.35:offset=24.25[v5];
+          [v5][6:v]xfade=transition=radial:duration=0.35:offset=29.10[v6];
+          [v6][7:v]xfade=transition=hblur:duration=0.35:offset=33.95[v7];
+          [v7][8:v]xfade=transition=fadeblack:duration=0.35:offset=38.80[v8];
+          [v8][9:v]xfade=transition=smoothup:duration=0.35:offset=43.65[v9];
+          [v9][10:v]xfade=transition=dissolve:duration=0.35:offset=48.50[v10];
+          [v10][11:v]xfade=transition=fadeblack:duration=0.35:offset=53.35,vignette=PI/7,fade=t=out:st=58.15:d=0.40[vout]
+          EOF
+          ffmpeg -y -hide_banner -loglevel error $(for I in $(seq -w 1 12); do printf -- "-i work/scenes/scene_%s.mp4 " "$I"; done) -filter_complex_script work/xfade.txt -map '[vout]' -c:v libx264 -preset veryfast -crf 17 -profile:v high -level 5.2 -pix_fmt yuv420p work/video_only.mp4
+
+      - name: Mix epic music with Ukrainian narration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          lines=[]
+          timing=[]
+          for row in Path('work/assets/timing.txt').read_text().splitlines():
+              i,start=row.split(); timing.append((int(i),float(start)))
+          for idx,(i,start) in enumerate(timing,1):
+              ms=int(round(start*1000))
+              lines.append(f'[{idx}:a]adelay={ms}|{ms}[v{idx}]')
+          voices=''.join(f'[v{i}]' for i in range(1,len(timing)+1))
+          lines.append(f'{voices}amix=inputs={len(timing)}:normalize=0,apad=whole_dur=58.55,volume=1.08[voice]')
+          lines.append('[voice]asplit=2[vsc][vmix]')
+          lines.append('[0:a]atrim=0:58.55,asetpts=PTS-STARTPTS,volume=0.88[music]')
+          lines.append('[music][vsc]sidechaincompress=threshold=0.025:ratio=9:attack=16:release=330[duck]')
+          lines.append('[duck][vmix]amix=inputs=2:weights=0.92 1.0:normalize=0,alimiter=limit=0.95,afade=t=out:st=58.0:d=0.5[aout]')
+          Path('work/audio_mix.txt').write_text(';\n'.join(lines))
+          PY
+          ffmpeg -y -hide_banner -loglevel error -i work/assets/music.wav $(for I in $(seq -w 1 11); do printf -- "-i work/voice_proc/voice_%s.wav " "$I"; done) -filter_complex_script work/audio_mix.txt -map '[aout]' -c:a pcm_s16le output/VOICE_AND_EPIC_MUSIC_MASTER.wav
+
+      - name: Final 2K and OBS renders
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -y -hide_banner -loglevel error -i work/video_only.mp4 -i output/VOICE_AND_EPIC_MUSIC_MASTER.wav -map 0:v:0 -map 1:a:0 -c:v libx264 -preset medium -crf 16 -profile:v high -level 5.2 -pix_fmt yuv420p -c:a aac -b:a 320k -ar 48000 -ac 2 -movflags +faststart output/TiHiY_STAR_CITIZEN_LORE_V2_EPIC_2K_60FPS.mp4
+          ffmpeg -y -hide_banner -loglevel error -i output/TiHiY_STAR_CITIZEN_LORE_V2_EPIC_2K_60FPS.mp4 -vf 'scale=1920:1080:flags=lanczos' -c:v libx264 -preset medium -crf 19 -profile:v high -pix_fmt yuv420p -c:a copy -movflags +faststart output/TiHiY_STAR_CITIZEN_LORE_V2_EPIC_1080p_60FPS.mp4
+          ffmpeg -y -hide_banner -loglevel error -ss 2.0 -i output/TiHiY_STAR_CITIZEN_LORE_V2_EPIC_2K_60FPS.mp4 -frames:v 1 output/PREVIEW_01.jpg
+          ffmpeg -y -hide_banner -loglevel error -ss 27.0 -i output/TiHiY_STAR_CITIZEN_LORE_V2_EPIC_2K_60FPS.mp4 -frames:v 1 output/PREVIEW_02.jpg
+          ffmpeg -y -hide_banner -loglevel error -ss 50.0 -i output/TiHiY_STAR_CITIZEN_LORE_V2_EPIC_2K_60FPS.mp4 -frames:v 1 output/PREVIEW_03.jpg
+          ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,r_frame_rate,sample_rate,channels -of json output/TiHiY_STAR_CITIZEN_LORE_V2_EPIC_2K_60FPS.mp4
+
+      - name: Upload final lore V2 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-Star-Citizen-Lore-V2-Epic
+          path: output/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
