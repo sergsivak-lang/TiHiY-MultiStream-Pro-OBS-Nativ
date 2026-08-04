@@ -1,0 +1,98 @@
+name: Capture New Official Star Citizen Streams
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[BROWSERCAP]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Install capture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl python3 python3-pip
+          python3 -m pip install -U selenium
+          google-chrome --version || google-chrome-stable --version || chromium --version
+          mkdir -p output
+
+      - name: Open official videos in Chrome and capture media requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > capture.py <<'PY'
+          import json, time, os
+          from pathlib import Path
+          from selenium import webdriver
+          from selenium.webdriver.chrome.options import Options
+
+          videos = {
+              'basher':'whpBNeYsJQA',
+              'patch49':'OX__JZULs-Y',
+              'tyilui':'oulQmbwN87M',
+              'railen':'Xh35kuWo0a4',
+          }
+
+          for name, vid in videos.items():
+              opts=Options()
+              opts.add_argument('--headless=new')
+              opts.add_argument('--no-sandbox')
+              opts.add_argument('--disable-dev-shm-usage')
+              opts.add_argument('--autoplay-policy=no-user-gesture-required')
+              opts.add_argument('--window-size=1920,1080')
+              opts.add_argument('--disable-blink-features=AutomationControlled')
+              opts.add_argument('--lang=en-US')
+              opts.set_capability('goog:loggingPrefs', {'performance':'ALL','browser':'ALL'})
+              driver=webdriver.Chrome(options=opts)
+              try:
+                  url=f'https://www.youtube.com/embed/{vid}?autoplay=1&mute=1&controls=1&playsinline=1'
+                  driver.get(url)
+                  time.sleep(12)
+                  driver.save_screenshot(f'output/{name}_player.png')
+                  Path(f'output/{name}_title.txt').write_text(driver.title or '')
+                  try:
+                      state=driver.execute_script("return document.querySelector('video') ? {src:document.querySelector('video').currentSrc, ready:document.querySelector('video').readyState, duration:document.querySelector('video').duration, paused:document.querySelector('video').paused, error:document.querySelector('video').error && document.querySelector('video').error.message} : null")
+                  except Exception as e:
+                      state={'error':str(e)}
+                  Path(f'output/{name}_video_state.json').write_text(json.dumps(state,indent=2,default=str))
+
+                  media=[]
+                  all_urls=[]
+                  for entry in driver.get_log('performance'):
+                      try:
+                          msg=json.loads(entry['message'])['message']
+                          if msg.get('method')!='Network.responseReceived': continue
+                          r=msg['params']['response']
+                          u=r.get('url','')
+                          if u: all_urls.append(u)
+                          mime=r.get('mimeType','')
+                          if 'googlevideo.com/videoplayback' in u or mime.startswith('video/') or mime.startswith('audio/'):
+                              media.append({'url':u,'mimeType':mime,'status':r.get('status'),'headers':r.get('headers',{})})
+                      except Exception:
+                          pass
+                  Path(f'output/{name}_media.json').write_text(json.dumps(media,indent=2))
+                  Path(f'output/{name}_all_urls.txt').write_text('\n'.join(all_urls))
+                  print(name, 'media responses:', len(media), 'video state:', state)
+              finally:
+                  driver.quit()
+          PY
+          python3 capture.py
+          find output -maxdepth 1 -type f -printf '%f %s bytes\n'
+          for F in output/*_media.json; do echo "==== $F"; grep -o 'https[^" ]*googlevideo[^" ]*' "$F" | head -5 || true; done
+
+      - name: Upload captured media metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-New-Official-Browser-Capture
+          path: output/*
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
