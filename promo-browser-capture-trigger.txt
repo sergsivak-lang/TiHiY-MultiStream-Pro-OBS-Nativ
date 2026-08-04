@@ -1,0 +1,1 @@
+Use real Chrome playback to capture the media streams of the new official Star Citizen videos.
