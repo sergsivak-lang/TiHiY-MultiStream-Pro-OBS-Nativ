@@ -1,0 +1,3 @@
+Generate the Ukrainian male lore narration timeline for the extended Star Citizen promo.
+Retry through pull_request_target workflow.
+Final reporter-enabled run.
