@@ -1,1 +1,2 @@
-Use real Chrome playback to capture the media streams of the new official Star Citizen videos.
+Use normal YouTube watch pages in real Chrome to capture the media streams of the new official Star Citizen videos.
+Retry after replacing the failing embed player approach.
