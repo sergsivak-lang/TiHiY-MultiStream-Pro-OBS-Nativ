@@ -1,0 +1,119 @@
+name: Scan New RSI Landing Media
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[LANDMEDIA]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl python3
+          mkdir -p pages output
+
+      - name: Find current official landing pages from Comm-Link index
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --compressed --retry 5 --retry-delay 2 \
+            -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36' \
+            'https://robertsspaceindustries.com/en/comm-link' -o pages/index.html
+          python3 - <<'PY'
+          import re,html
+          from pathlib import Path
+          s=html.unescape(Path('pages/index.html').read_text(errors='ignore')).replace('\\/','/')
+          links=[]
+          for m in re.finditer(r'href=["\']([^"\']*/comm-link/transmission/[^"\']+)["\']',s,re.I):
+              u=m.group(1)
+              a=max(0,m.start()-700); b=min(len(s),m.end()+1000)
+              context=re.sub(r'<[^>]+>',' ',s[a:b])
+              context=' '.join(context.split())
+              low=context.lower()
+              if any(k in low for k in ['grey', 'basher','frontier tensions','gatac tyilui','gatac railen']):
+                  if u.startswith('/'): u='https://robertsspaceindustries.com'+u
+                  elif u.startswith('http') is False: u='https://robertsspaceindustries.com/'+u.lstrip('/')
+                  links.append((u,context[:1300]))
+          # Hard-code known new pages too, so list parser isn't a single point of failure.
+          known=[
+            'https://robertsspaceindustries.com/en/comm-link/transmission/21220-Alpha-49-Frontier-Tensions',
+            'https://robertsspaceindustries.com/en/comm-link/transmission/21227-Grey-s-Market-Basher',
+          ]
+          for u in known: links.append((u,'known-current-page'))
+          seen=set(); out=[]
+          for u,c in links:
+              if u not in seen:
+                  seen.add(u); out.append((u,c))
+          Path('output/discovered_pages.txt').write_text('\n'.join(u for u,_ in out))
+          Path('output/discovered_context.txt').write_text('\n\n'.join(u+'\n'+c for u,c in out))
+          print('\n'.join(u for u,_ in out))
+          PY
+
+      - name: Fetch pages and extract moving media assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          I=0
+          while IFS= read -r URL; do
+            [ -n "$URL" ] || continue
+            F="pages/page_${I}.html"
+            curl -fL --compressed --retry 5 --retry-delay 2 \
+              -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36' \
+              "$URL" -o "$F" || true
+            echo "$URL" > "output/page_${I}_url.txt"
+            cp "$F" "output/page_${I}.html" 2>/dev/null || true
+            I=$((I+1))
+          done < output/discovered_pages.txt
+
+          python3 - <<'PY'
+          import re,html,json
+          from pathlib import Path
+          exts=('mp4','webm','mov','m3u8','mpd','gif')
+          summary=[]
+          for p in sorted(Path('pages').glob('page_*.html')):
+              s=html.unescape(p.read_text(errors='ignore')).replace('\\/','/')
+              urls=[]
+              # Fully-qualified and protocol-relative URLs.
+              for pat in [r'https?://[^"\'<>\s]+',r'//[^"\'<>\s]+']:
+                  urls += re.findall(pat,s,re.I)
+              # Quoted relative asset paths.
+              urls += re.findall(r'["\']([^"\']+\.(?:mp4|webm|mov|m3u8|mpd|gif)(?:\?[^"\']*)?)["\']',s,re.I)
+              keep=[]
+              for u in urls:
+                  low=u.lower()
+                  if any(('.'+e) in low for e in exts) or 'video' in low or 'stream' in low:
+                      u=u.rstrip(');,]')
+                      if u.startswith('//'): u='https:'+u
+                      if u not in keep: keep.append(u)
+              # Media hashes and explicit source-ish snippets are useful even when extensions are hidden.
+              hashes=sorted(set(re.findall(r'media\.robertsspaceindustries\.com/([a-z0-9]{8,})/',s,re.I)))
+              snippets=[]
+              for m in re.finditer(r'(?i)(<video|video-|video_|backgroundvideo|background-video|source=|src=|webm|mp4|m3u8|autoplay)',s):
+                  snippets.append(s[max(0,m.start()-500):min(len(s),m.end()+900)])
+                  if len(snippets)>=180: break
+              stem=p.stem
+              Path(f'output/{stem}_media_urls.txt').write_text('\n'.join(keep))
+              Path(f'output/{stem}_media_hashes.txt').write_text('\n'.join(hashes))
+              Path(f'output/{stem}_media_snippets.txt').write_text('\n\n---\n\n'.join(snippets))
+              summary.append({'page':stem,'media_urls':keep,'hashes':hashes})
+          Path('output/summary.json').write_text(json.dumps(summary,indent=2))
+          print(json.dumps(summary,indent=2))
+          PY
+
+      - name: Upload landing-media scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-New-RSI-Landing-Media-Scan
+          path: output/*
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
