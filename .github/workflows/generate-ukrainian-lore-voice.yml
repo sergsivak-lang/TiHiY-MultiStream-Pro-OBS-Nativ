@@ -1,6 +1,9 @@
 name: Generate Ukrainian Lore Voice
 
 on:
+  push:
+    branches: [master]
+    paths: [voice-trigger-master.txt]
   pull_request_target:
     branches: [master]
     types: [opened, synchronize, reopened]
@@ -10,7 +13,7 @@ permissions:
 
 jobs:
   voice:
-    if: contains(github.event.pull_request.title, '[VOICE]')
+    if: github.event_name == 'push' || contains(github.event.pull_request.title, '[VOICE]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
