@@ -1,0 +1,85 @@
+name: Fetch New Official Star Citizen Videos with PO Token
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[POTFETCH]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+
+    steps:
+      - name: Install yt-dlp, FFmpeg and PO-token plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg python3 python3-pip docker.io
+          python3 -m pip install -U --pre yt-dlp bgutil-ytdlp-pot-provider
+          mkdir -p work output
+          yt-dlp --version
+          docker --version
+
+      - name: Start BgUtils PO-token provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker pull brainicism/bgutil-ytdlp-pot-provider:latest
+          sudo docker run --name bgutil-provider -d --init -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider:latest
+          sleep 6
+          sudo docker ps
+          sudo docker logs bgutil-provider --tail 50 || true
+
+      - name: Download four newly selected official 2026 Star Citizen videos
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          declare -A IDS=(
+            [basher]='whpBNeYsJQA'
+            [patch49]='OX__JZULs-Y'
+            [tyilui]='oulQmbwN87M'
+            [railen]='Xh35kuWo0a4'
+          )
+          for K in basher patch49 tyilui railen; do
+            VID="${IDS[$K]}"
+            URL="https://www.youtube.com/watch?v=${VID}"
+            echo "===== ${K}: ${URL} ====="
+            yt-dlp -v --no-playlist \
+              --extractor-args 'youtube:player_client=mweb,web_safari,android_vr' \
+              --extractor-args 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416' \
+              --retries 6 --fragment-retries 6 \
+              -f 'bv*[height<=1440]+ba/b[height<=1440]' \
+              --merge-output-format mp4 \
+              -o "${K}.mp4" "$URL"
+            ffprobe -v error -show_entries format=duration,size:stream=codec_type,codec_name,width,height,r_frame_rate \
+              -of json "${K}.mp4" > "../output/${K}_info.json"
+          done
+
+      - name: Verify official titles and create timestamped contact sheets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd work
+          FONT='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+          for K in basher patch49 tyilui railen; do
+            ffmpeg -y -hide_banner -loglevel error -i "${K}.mp4" \
+              -vf "fps=1/3,scale=480:-2,drawtext=fontfile=${FONT}:text='%{pts\\:hms}':x=8:y=8:fontsize=22:fontcolor=white:borderw=2:bordercolor=black,tile=4x4:padding=4:margin=4" \
+              -q:v 2 -vsync vfr "../output/${K}_sheet_%02d.jpg"
+          done
+
+      - name: Upload verified new-source scan
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-New-Official-POT-Source-Scan
+          path: output/*
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
