@@ -13,130 +13,53 @@ jobs:
   build:
     if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[MOTIONPACK]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 35
     steps:
       - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y curl python3 ffmpeg
-          mkdir -p pages alex output/videos output/sheets output/meta
+          mkdir -p output/videos output/sheets output/meta
 
-      - name: Discover current official promo landing pages
+      - name: Download verified new official RSI motion sources
         shell: bash
         run: |
           set -euo pipefail
-          curl -fL --compressed --retry 5 -A 'Mozilla/5.0 Chrome/150 Safari/537.36' 'https://robertsspaceindustries.com/en/comm-link?text=Gatac%20Tyilui' -o pages/search_tyilui.html
-          curl -fL --compressed --retry 5 -A 'Mozilla/5.0 Chrome/150 Safari/537.36' 'https://robertsspaceindustries.com/en/comm-link?text=Gatac%20Railen' -o pages/search_railen.html
-          python3 - <<'PY'
-          import re,html,json
-          from pathlib import Path
-          found={'frontier':'https://robertsspaceindustries.com/en/comm-link/transmission/21220-Alpha-49-Frontier-Tensions','basher':'https://robertsspaceindustries.com/en/comm-link/transmission/21227-Grey-s-Market-Basher'}
-          tests=[('tyilui','pages/search_tyilui.html',['gatac tyilui','transcend the ordinary']),('railen','pages/search_railen.html',['gatac railen','different way to haul'])]
-          for key,path,needles in tests:
-              s=html.unescape(Path(path).read_text(errors='ignore')).replace('\\/','/')
-              candidates=[]
-              for m in re.finditer(r'href=["\']([^"\']*/comm-link/transmission/[^"\']+)["\']',s,re.I):
-                  u=m.group(1); context=re.sub(r'<[^>]+>',' ',s[max(0,m.start()-600):min(len(s),m.end()+800)])
-                  low=' '.join(context.lower().split()); score=sum(1 for n in needles if n in low)
-                  if score:
-                      if u.startswith('/'): u='https://robertsspaceindustries.com'+u
-                      elif not u.startswith('http'): u='https://robertsspaceindustries.com/'+u.lstrip('/')
-                      candidates.append((score,u))
-              if not candidates: raise SystemExit(f'Could not discover current {key} landing page')
-              candidates.sort(reverse=True); found[key]=candidates[0][1]
-          Path('output/meta/pages.json').write_text(json.dumps(found,indent=2))
-          for k,u in found.items(): print(k,u)
-          PY
+          BASHER_URL='https://media.robertsspaceindustries.com/mhnviqz32lc2i/source.mp4'
+          TYILUI_URL='https://media.robertsspaceindustries.com/pahuti3et7hie/source.mp4'
 
-      - name: Fetch pages and Alexandria layouts
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,subprocess,re,pathlib
-          pages=json.loads(pathlib.Path('output/meta/pages.json').read_text())
-          for k,u in pages.items():
-              subprocess.run(['curl','-fL','--compressed','--retry','5','-A','Mozilla/5.0 Chrome/150 Safari/537.36',u,'-o',f'pages/{k}.html'],check=True)
-              s=pathlib.Path(f'pages/{k}.html').read_text(errors='ignore'); m=re.search(r"const\s+s3Url\s*=\s*'([^']+)'",s)
-              if not m: raise SystemExit(f'No Alexandria layout URL for {k}')
-              au=m.group(1); pathlib.Path(f'output/meta/{k}_alex_url.txt').write_text(au+'\n')
-              subprocess.run(['curl','-fL','--compressed','--retry','5','-A','Mozilla/5.0 Chrome/150 Safari/537.36',au,'-o',f'alex/{k}.html'],check=True)
-          PY
+          printf '%s\n' "$BASHER_URL" > output/meta/basher_source_url.txt
+          printf '%s\n' "$TYILUI_URL" > output/meta/tyilui_source_url.txt
 
-      - name: Extract explicit videos and probe every RSI media hash
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > discover.py <<'PY'
-          import re,html,json,subprocess,pathlib
-          pages=['frontier','basher','tyilui','railen']
-          variants=['source.mp4','mp4_3440.mp4','mp4_2560.mp4','mp4_1920.mp4','webm_1920.webm','mp4_1280.mp4','webm_1280.webm']
-          final={}
-          for k in pages:
-              s=html.unescape(pathlib.Path(f'alex/{k}.html').read_text(errors='ignore')).replace('\\/','/')
-              explicit=re.findall(r'https?://[^"\'<>\s]+\.(?:mp4|webm|mov)(?:\?[^"\'<>\s]*)?',s,re.I)
-              hashes=sorted(set(re.findall(r'(?:media|cdn)\.robertsspaceindustries\.com/([a-z0-9]{8,})/',s,re.I)))
-              urls=[]
-              for u in explicit:
-                  u=u.rstrip('),;]')
-                  if u not in urls: urls.append(u)
-              for h in hashes:
-                  for v in variants:
-                      u=f'https://media.robertsspaceindustries.com/{h}/{v}'
-                      p=subprocess.run(['curl','-ILsS','--max-time','10','-A','Mozilla/5.0',u],capture_output=True,text=True); hdr=p.stdout.lower()
-                      if p.returncode==0 and 'content-type: video/' in hdr:
-                          lengths=[int(x) for x in re.findall(r'content-length:\s*(\d+)',hdr)]
-                          if max(lengths,default=0)>=500000 and u not in urls: urls.append(u)
-              by_hash={}
-              def rank(u):
-                  name=u.split('/')[-1].lower()
-                  if name.startswith('source.mp4'): return 100
-                  if '3440' in name and '.mp4' in name: return 90
-                  if '2560' in name and '.mp4' in name: return 85
-                  if '1920' in name and '.mp4' in name: return 80
-                  if '.mp4' in name: return 70
-                  return 50
-              for u in urls:
-                  m=re.search(r'industries\.com/([a-z0-9]+)/',u,re.I); key=m.group(1) if m else u
-                  if key not in by_hash or rank(u)>rank(by_hash[key]): by_hash[key]=u
-              selected=sorted(by_hash.values(),key=rank,reverse=True)[:8]
-              final[k]={'hashes':hashes,'selected':selected}
-              pathlib.Path(f'output/meta/{k}_motion_urls.txt').write_text('\n'.join(selected) + ('\n' if selected else ''))
-              print(k,selected)
-          pathlib.Path('output/meta/discovery.json').write_text(json.dumps(final,indent=2))
-          PY
-          python3 discover.py
+          curl -fL --retry 8 --retry-delay 2 --connect-timeout 20 -A 'Mozilla/5.0' "$BASHER_URL" -o output/videos/basher.mp4
+          curl -fL --retry 8 --retry-delay 2 --connect-timeout 20 -A 'Mozilla/5.0' "$TYILUI_URL" -o output/videos/tyilui.mp4
 
-      - name: Download all discovered current motion clips
-        shell: bash
-        run: |
-          set -euo pipefail
-          for K in frontier basher tyilui railen; do
-            N=0
-            while IFS= read -r URL || [ -n "$URL" ]; do
-              [ -n "$URL" ] || continue
-              OUT="output/videos/${K}_${N}.mp4"
-              echo "Downloading $K $N: $URL"
-              curl -fL --retry 6 --retry-delay 2 -A 'Mozilla/5.0' "$URL" -o "$OUT" || { rm -f "$OUT"; continue; }
-              if ! ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" | grep -q .; then rm -f "$OUT"; continue; fi
-              ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,r_frame_rate -of json "$OUT" > "output/meta/${K}_${N}_info.json"
-              N=$((N+1))
-            done < "output/meta/${K}_motion_urls.txt"
+          for F in output/videos/*.mp4; do
+            B=$(basename "$F" .mp4)
+            ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate -show_entries format=duration,size -of json "$F" > "output/meta/${B}_info.json"
+            ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$F" | grep -q .
           done
           find output/videos -type f -printf '%f %s bytes\n' | sort
 
-      - name: Make visual contact sheets for every new motion clip
+      - name: Make visual contact sheets
         shell: bash
         run: |
           set -euo pipefail
           FONT='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
           for F in output/videos/*.mp4; do
-            [ -f "$F" ] || continue
             B=$(basename "$F" .mp4)
-            ffmpeg -y -hide_banner -loglevel error -i "$F" -vf "fps=1/2,scale=480:-2,drawtext=fontfile=${FONT}:text='%{pts\\:hms}':x=8:y=8:fontsize=20:fontcolor=white:borderw=2:bordercolor=black,tile=4x3:padding=4:margin=4" -q:v 2 "output/sheets/${B}_sheet_%02d.jpg" || true
+            DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$F")
+            INTERVAL=$(python3 - <<PY
+          d=float('$DUR')
+          print(max(d/12.0,0.5))
+          PY
+          )
+            ffmpeg -y -hide_banner -loglevel error -i "$F" \
+              -vf "fps=1/${INTERVAL},scale=480:-2,drawtext=fontfile=${FONT}:text='%{pts\\:hms}':x=8:y=8:fontsize=20:fontcolor=white:borderw=2:bordercolor=black,tile=4x3:padding=4:margin=4" \
+              -frames:v 1 -q:v 2 "output/sheets/${B}_sheet.jpg"
           done
 
-      - name: Upload current motion pack
+      - name: Upload verified new RSI motion pack
         uses: actions/upload-artifact@v4
         with:
           name: TiHiY-New-RSI-Motion-Pack
