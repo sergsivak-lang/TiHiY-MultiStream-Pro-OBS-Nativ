@@ -1,0 +1,32 @@
+name: Fetch Vulture Source
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    if: contains(github.event.pull_request.title, '[VULTURE]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y curl ffmpeg
+      - name: Download official RSI Vulture motion clips
+        run: |
+          mkdir -p output
+          curl -fL --retry 6 --retry-delay 2 'https://media.robertsspaceindustries.com/it5ybxvjk3kwx/source.mp4' -o output/vulture_1.mp4
+          curl -fL --retry 6 --retry-delay 2 'https://media.robertsspaceindustries.com/ap0indqk6nc4w/source.mp4' -o output/vulture_2.mp4
+          ffprobe -v error -show_entries format=duration,size:stream=width,height,r_frame_rate -of json output/vulture_1.mp4 > output/vulture_1.json
+          ffprobe -v error -show_entries format=duration,size:stream=width,height,r_frame_rate -of json output/vulture_2.mp4 > output/vulture_2.json
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-Vulture-Official-Motion
+          path: output/*
+          compression-level: 0
+          retention-days: 7
