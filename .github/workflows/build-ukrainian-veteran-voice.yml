@@ -1,0 +1,58 @@
+name: Build Ukrainian Veteran Voice
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  voice:
+    if: contains(github.event.pull_request.title, '[VOICE]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg curl tar
+          mkdir -p work out
+
+      - name: Download Piper and Ukrainian Mykyta voice
+        run: |
+          set -euo pipefail
+          curl -fL --retry 5 -o piper.tar.gz https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz
+          tar -xzf piper.tar.gz
+          curl -fL --retry 5 -o work/voice.onnx https://huggingface.co/rhasspy/piper-voices/resolve/main/uk/uk_UA/mykyta/high/uk_UA-mykyta-high.onnx
+          curl -fL --retry 5 -o work/voice.onnx.json https://huggingface.co/rhasspy/piper-voices/resolve/main/uk/uk_UA/mykyta/high/uk_UA-mykyta-high.onnx.json
+
+      - name: Synthesize lore narration
+        shell: bash
+        run: |
+          cat > work/lore.txt <<'EOF'
+          2956 рік. Людство дісталося зірок. Але космос так і не став безпечним.
+          Тут немає одного шляху. Є тисячі маршрутів, контрактів і рішень. Кожен виліт може стати новою історією.
+          У цьому всесвіті кожен корабель має характер. Військова міць. Швидкість. Вантаж. Розкіш. Промисловість. Свій почерк. Свій виробник.
+          Одні шукають руду в холодних астероїдах. Інші повертають до життя метал загиблих кораблів, розбираючи їх по шматках.
+          Хтось перевозить вантаж. Хтось досліджує невідоме. Хтось рятує. А хтось полює.
+          Та коли контракт перетворюється на бій, лишаються тільки твій корабель, твій екіпаж і досвід, здобутий під вогнем.
+          Ми летимо туди, куди інші не наважуються. Ми падаємо. Піднімаємось. І знову вирушаємо в політ.
+          Ми не спостерігаємо за всесвітом.
+          Ми залишаємо в ньому свій слід.
+          Тихий Дід.
+          EOF
+          cat work/lore.txt | ./piper/piper --model work/voice.onnx --output_file work/raw.wav --length_scale 1.12 --noise_scale 0.56 --noise_w 0.72
+          ffmpeg -y -hide_banner -loglevel error -i work/raw.wav \
+            -af "asetrate=22050*0.90,aresample=48000,bass=g=9:f=95,treble=g=-2.5:f=3200,acompressor=threshold=-22dB:ratio=3.2:attack=12:release=180,aecho=0.8:0.22:24:0.055,volume=1.7,alimiter=limit=0.95" \
+            out/TiHiY_UA_VETERAN_LORE.wav
+          ffprobe -v error -show_entries format=duration,size -of default=nw=1 out/TiHiY_UA_VETERAN_LORE.wav
+
+      - name: Upload voice
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiHiY-Ukrainian-Veteran-Voice
+          path: out/TiHiY_UA_VETERAN_LORE.wav
+          compression-level: 0
+          retention-days: 7
