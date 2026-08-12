@@ -12,9 +12,10 @@
 #include <QStringList>
 
 #include <obs-module.h>
+#include <obs-frontend-api.h>
+#include <util/config-file.h>
 
 static constexpr const char *VIDEO_ENCODER_ID_NVENC = "obs_nvenc_h264_tex";
-static constexpr const char *VIDEO_ENCODER_ID_X264 = "obs_x264";
 static constexpr const char *AUDIO_ENCODER_ID = "ffmpeg_aac";
 static constexpr const char *OUTPUT_ID = "rtmp_output";
 static constexpr const char *SERVICE_ID = "rtmp_common";
@@ -45,7 +46,7 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     twitchMode_->addItem("2K 1440p60");
     twitchMode_->addItem("2K 1440p60 + Vertical");
     twitchMode_->setCurrentIndex(0);
-    twitchMode_->setToolTip("Twitch mode. 2K requires OBS 32+ and Twitch Enhanced Broadcasting. Vertical requires Aitum Vertical.");
+    twitchMode_->setToolTip("Twitch: HD uses the plugin RTMP output. 2K uses OBS native Multitrack Video; Vertical also requires Aitum Vertical.");
     main->addWidget(new QLabel("<b>Twitch mode</b>"));
     main->addWidget(twitchMode_);
     customDialog_ = makeTargetDialog("Custom RTMP", custom_, "", 1920, 1080, 60, 8000, 160);
@@ -121,7 +122,7 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     setTargetState(twitch_, "READY", "idle");
     setTargetState(custom_, "READY", "idle");
     updateGlobalState();
-    appendLog("Compact scalable panel ready. Start buttons now show STARTING / LIVE / STOPPED status.");
+    appendLog("Compact scalable panel ready. Twitch 2K modes use OBS native Multitrack Video when available.");
 }
 
 TihiyMultistreamDock::~TihiyMultistreamDock()
@@ -252,13 +253,13 @@ void TihiyMultistreamDock::setTargetState(TihiyTargetUi &ui, const QString &stat
 
 void TihiyMultistreamDock::updateGlobalState()
 {
-    const bool anyLive = youtubeOut_.output || twitchOut_.output || customOut_.output;
+    const bool anyLive = youtubeOut_.output || customOut_.output || twitchOut_.output || twitchFrontendActive_;
 
     if (globalStatus_) {
         if (anyLive) {
             QStringList live;
             if (youtubeOut_.output) live << "YouTube";
-            if (twitchOut_.output) live << "Twitch";
+            if (twitchOut_.output || twitchFrontendActive_) live << "Twitch";
             if (customOut_.output) live << "Custom";
             globalStatus_->setText("Status: LIVE — " + live.join(" + "));
             globalStatus_->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #188038; color: white;");
@@ -321,8 +322,8 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
             ui.fps->setValue(60);
             ui.videoBitrate->setValue(9000);
             appendLog(twitchMode == 1
-                ? "Twitch 2K profile: 2560x1440@60, 9 Mbps. Enhanced Broadcasting must be enabled in OBS."
-                : "Twitch 2K + Vertical profile: 2560x1440@60 + 1080x1920 vertical canvas. Enhanced Broadcasting + Aitum Vertical required.");
+                ? "Twitch 2K fallback profile: 2560x1440@60, 9 Mbps."
+                : "Twitch 2K + Vertical fallback profile: 2560x1440@60 + 1080x1920 canvas.");
         } else {
             ui.width->setValue(1920);
             ui.height->setValue(1080);
@@ -339,7 +340,6 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     obs_data_set_string(vSettings, "rate_control", "CBR");
     obs_data_set_int(vSettings, "keyint_sec", 2);
     obs_data_set_string(vSettings, "profile", "high");
-
     obs_data_set_string(vSettings, "preset", "p5");
     obs_data_set_string(vSettings, "tuning", "hq");
     obs_data_set_string(vSettings, "multipass", "qres");
@@ -354,17 +354,6 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     obs_data_set_int(aSettings, "bitrate", ui.audioBitrate->value());
     handle.audio = obs_audio_encoder_create(AUDIO_ENCODER_ID, (name + " Audio").toUtf8().constData(), aSettings, 0, nullptr);
     obs_data_release(aSettings);
-
-    if (name == "Twitch" && twitchMode > 0) {
-        if (twitchMode == 2 && !obs_get_module("vertical-canvas")) {
-            setTargetState(ui, "Aitum Vertical required", "error");
-            appendLog("Twitch 2K + Vertical: Aitum Vertical is not detected. Install Aitum Vertical 1.6.4+.");
-            releaseTarget(handle);
-            updateGlobalState();
-            return false;
-        }
-        appendLog("Twitch 2K modes require OBS Enhanced Broadcasting (Multitrack Video). The profile is prepared by TiHiY MultiStream Pro; the OBS/Twitch service must provide the multitrack path.");
-    }
 
     handle.output = obs_output_create(OUTPUT_ID, (name + " Output").toUtf8().constData(), nullptr, nullptr);
 
@@ -400,6 +389,115 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     return true;
 }
 
+bool TihiyMultistreamDock::startTwitchEnhanced()
+{
+    if (!twitch_.enabled->isChecked()) {
+        setTargetState(twitch_, "DISABLED", "error");
+        return false;
+    }
+
+    if (twitch_.key->text().trimmed().isEmpty()) {
+        setTargetState(twitch_, "MISSING STREAM KEY", "error");
+        appendLog("Twitch: stream key is empty.");
+        return false;
+    }
+
+    if (obs_frontend_streaming_active() || twitchFrontendActive_) {
+        setTargetState(twitch_, "LIVE", "live");
+        appendLog("Twitch: native OBS streaming is already active.");
+        updateGlobalState();
+        return false;
+    }
+
+    const QString obsVersion = QString::fromUtf8(obs_get_version_string());
+    if (obs_get_version() < 0x2000000) {
+        setTargetState(twitch_, "OBS 32+ REQUIRED", "error");
+        appendLog("Twitch 2K: OBS Studio 32.0+ is required. Current version: " + obsVersion);
+        return false;
+    }
+
+    const int mode = twitchMode_ ? twitchMode_->currentIndex() : 1;
+    if (mode < 1)
+        return startTarget("Twitch", twitch_, twitchOut_);
+
+    if (mode == 2) {
+        obs_canvas_t *vertical = obs_get_canvas_by_name("Aitum Vertical");
+        if (!vertical)
+            vertical = obs_get_canvas_by_name("Vertical");
+        if (!vertical) {
+            setTargetState(twitch_, "Aitum Vertical REQUIRED", "error");
+            appendLog("Twitch 2K + Vertical: Aitum Vertical canvas was not found. Install the current Aitum Vertical plugin, create its vertical canvas, then restart OBS.");
+            return false;
+        }
+        obs_canvas_release(vertical);
+    }
+
+    config_t *profile = obs_frontend_get_profile_config();
+    if (!profile) {
+        setTargetState(twitch_, "PROFILE CONFIG FAILED", "error");
+        appendLog("Twitch 2K: unable to access OBS profile configuration.");
+        return false;
+    }
+
+    config_set_bool(profile, "Stream1", "EnableMultitrackVideo", true);
+    config_set_bool(profile, "Stream1", "MultitrackVideoMaximumAggregateBitrateAuto", true);
+    config_set_bool(profile, "Stream1", "MultitrackVideoMaximumVideoTracksAuto", false);
+    config_set_int(profile, "Stream1", "MultitrackVideoMaximumVideoTracks", mode == 2 ? 5 : 4);
+
+    if (mode == 2) {
+        obs_canvas_t *vertical = obs_get_canvas_by_name("Aitum Vertical");
+        if (!vertical)
+            vertical = obs_get_canvas_by_name("Vertical");
+        if (vertical) {
+            config_set_string(profile, "Stream1", "MultitrackExtraCanvas", obs_canvas_get_uuid(vertical));
+            obs_canvas_release(vertical);
+        }
+    } else {
+        config_remove_value(profile, "Stream1", "MultitrackExtraCanvas");
+    }
+
+    config_save_safe(profile, "tmp", nullptr);
+
+    obs_data_t *settings = obs_data_create();
+    obs_data_set_string(settings, "service", "Twitch");
+    obs_data_set_string(settings, "server", twitch_.server->text().toUtf8().constData());
+    obs_data_set_string(settings, "key", twitch_.key->text().toUtf8().constData());
+    obs_data_set_bool(settings, "using_custom_server", false);
+    obs_data_set_bool(settings, "bwtest", false);
+
+    obs_service_t *service = obs_service_create(SERVICE_ID, "TiHiY Twitch Enhanced", settings, nullptr);
+    obs_data_release(settings);
+
+    if (!service) {
+        setTargetState(twitch_, "TWITCH SERVICE FAILED", "error");
+        appendLog("Twitch 2K: failed to create native Twitch service.");
+        return false;
+    }
+
+    twitch_.width->setValue(2560);
+    twitch_.height->setValue(1440);
+    twitch_.fps->setValue(60);
+    twitch_.videoBitrate->setValue(9000);
+
+    obs_frontend_set_streaming_service(service);
+    obs_frontend_save_streaming_service();
+    obs_service_release(service);
+
+    setTargetState(twitch_, "STARTING...", "starting");
+    updateGlobalState();
+
+    appendLog(mode == 1
+        ? "Twitch 2K: enabling OBS native Multitrack Video, max 4 video tracks, aggregate bandwidth Auto."
+        : "Twitch 2K + Vertical: enabling OBS native Multitrack Video, 5 video tracks, Aitum Vertical as additional canvas.");
+
+    obs_frontend_streaming_start();
+    twitchFrontendActive_ = true;
+    setTargetState(twitch_, "LIVE / START REQUESTED", "live");
+    updateGlobalState();
+    appendLog("Twitch native streaming start requested. OBS/Twitch now owns the Enhanced Broadcasting session.");
+    return true;
+}
+
 void TihiyMultistreamDock::stopTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle)
 {
     if (handle.output) {
@@ -413,11 +511,22 @@ void TihiyMultistreamDock::stopTarget(const QString &name, TihiyTargetUi &ui, Ti
     updateGlobalState();
 }
 
+void TihiyMultistreamDock::stopTwitchEnhanced()
+{
+    if (obs_frontend_streaming_active()) {
+        obs_frontend_streaming_stop();
+        appendLog("Twitch: native OBS streaming stop requested.");
+    }
+    twitchFrontendActive_ = false;
+    setTargetState(twitch_, "STOPPED", "idle");
+    updateGlobalState();
+}
+
 void TihiyMultistreamDock::releaseTarget(TihiyOutputHandle &handle)
 {
     if (handle.output) { obs_output_release(handle.output); handle.output = nullptr; }
     if (handle.video) { obs_encoder_release(handle.video); handle.video = nullptr; }
-    if (handle.audio) { obs_encoder_release(handle.audio); handle.audio = nullptr; }
+    if (handle.audio) { obs_audio_encoder_release(handle.audio); handle.audio = nullptr; }
     if (handle.service) { obs_service_release(handle.service); handle.service = nullptr; }
 }
 
@@ -490,7 +599,14 @@ void TihiyMultistreamDock::loadSettings()
 }
 
 void TihiyMultistreamDock::startYouTube() { startTarget("YouTube", youtube_, youtubeOut_); }
-void TihiyMultistreamDock::startTwitch() { startTarget("Twitch", twitch_, twitchOut_); }
+void TihiyMultistreamDock::startTwitch()
+{
+    const int mode = twitchMode_ ? twitchMode_->currentIndex() : 0;
+    if (mode > 0)
+        startTwitchEnhanced();
+    else
+        startTarget("Twitch", twitch_, twitchOut_);
+}
 void TihiyMultistreamDock::startCustom() { startTarget("Custom", custom_, customOut_); }
 
 void TihiyMultistreamDock::startAll()
@@ -509,7 +625,7 @@ void TihiyMultistreamDock::startAll()
         startedAny = startTarget("YouTube", youtube_, youtubeOut_) || startedAny;
 
     if (twitch_.enabled->isChecked())
-        startedAny = startTarget("Twitch", twitch_, twitchOut_) || startedAny;
+        startedAny = startTwitch() , true || startedAny;
 
     if (custom_.enabled->isChecked())
         startedAny = startTarget("Custom", custom_, customOut_) || startedAny;
@@ -521,12 +637,22 @@ void TihiyMultistreamDock::startAll()
 }
 
 void TihiyMultistreamDock::stopYouTube() { stopTarget("YouTube", youtube_, youtubeOut_); }
-void TihiyMultistreamDock::stopTwitch() { stopTarget("Twitch", twitch_, twitchOut_); }
+void TihiyMultistreamDock::stopTwitch()
+{
+    if (twitchFrontendActive_ || (twitchMode_ && twitchMode_->currentIndex() > 0))
+        stopTwitchEnhanced();
+    else
+        stopTarget("Twitch", twitch_, twitchOut_);
+}
 void TihiyMultistreamDock::stopCustom() { stopTarget("Custom", custom_, customOut_); }
 
 void TihiyMultistreamDock::stopAll()
 {
-    stopTarget("YouTube", youtube_, youtubeOut_);
-    stopTarget("Twitch", twitch_, twitchOut_);
-    stopTarget("Custom", custom_, customOut_);
+    stopYouTube();
+    if (twitchFrontendActive_)
+        stopTwitchEnhanced();
+    else
+        stopTarget("Twitch", twitch_, twitchOut_);
+    stopCustom();
+    updateGlobalState();
 }
