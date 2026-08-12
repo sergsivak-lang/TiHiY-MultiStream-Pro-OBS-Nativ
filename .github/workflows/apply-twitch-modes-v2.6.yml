@@ -1,6 +1,8 @@
 name: Apply Twitch Modes v2.6
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
