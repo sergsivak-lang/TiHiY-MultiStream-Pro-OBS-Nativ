@@ -1,0 +1,34 @@
+name: Apply Twitch Modes v2.6
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    name: Apply Twitch HD / 2K / Vertical modes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply source migration
+        run: python3 tools/apply-twitch-modes-v2.6.py
+
+      - name: Show changes
+        run: git diff -- src/tihiy-multistream-dock.cpp src/tihiy-multistream-dock.hpp
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/tihiy-multistream-dock.cpp src/tihiy-multistream-dock.hpp
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "feat: add Twitch HD 2K and vertical modes v2.6"
+          git push
