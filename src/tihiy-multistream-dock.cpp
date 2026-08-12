@@ -33,7 +33,6 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     auto *main = new QVBoxLayout(this);
     main->setContentsMargins(8, 8, 8, 8);
     main->setSpacing(6);
-
     auto *title = new QLabel("<b>TiHiY MultiStream Pro</b>");
     title->setAlignment(Qt::AlignCenter);
     main->addWidget(title);
@@ -46,7 +45,7 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     twitchMode_->addItem("2K 1440p60");
     twitchMode_->addItem("2K 1440p60 + Vertical");
     twitchMode_->setCurrentIndex(0);
-    twitchMode_->setToolTip("Twitch: HD uses the plugin RTMP output. 2K uses OBS native Multitrack Video; Vertical also requires Aitum Vertical.");
+    twitchMode_->setToolTip("HD uses the plugin RTMP output. 2K uses OBS native Multitrack Video. Vertical also requires Aitum Vertical.");
     main->addWidget(new QLabel("<b>Twitch mode</b>"));
     main->addWidget(twitchMode_);
     customDialog_ = makeTargetDialog("Custom RTMP", custom_, "", 1920, 1080, 60, 8000, 160);
@@ -59,8 +58,6 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     auto *startStopGrid = new QGridLayout();
     startAllButton_ = makeBigButton("Start All");
     stopAllButton_ = makeBigButton("Stop All");
-    startAllButton_->setToolTip("Start enabled outputs in order: YouTube, Twitch, Custom.");
-    stopAllButton_->setToolTip("Stop all active outputs.");
     startStopGrid->addWidget(startAllButton_, 0, 0);
     startStopGrid->addWidget(stopAllButton_, 0, 1);
     startStopGrid->setColumnStretch(0, 1);
@@ -73,13 +70,6 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     customSettingsButton_ = makeBigButton("Custom");
     saveSettingsButton_ = makeBigButton("Save settings");
     applyRecommendedButton_ = makeBigButton("Recommended settings");
-
-    youtubeSettingsButton_->setToolTip("Open YouTube stream settings.");
-    twitchSettingsButton_->setToolTip("Open Twitch stream settings.");
-    customSettingsButton_->setToolTip("Open custom RTMP settings.");
-    saveSettingsButton_->setToolTip("Save servers, stream keys, bitrate and enabled flags.");
-    applyRecommendedButton_->setToolTip("Apply YouTube 2K60 + Twitch HD recommended preset.");
-
     platformGrid->addWidget(youtubeSettingsButton_, 0, 0);
     platformGrid->addWidget(twitchSettingsButton_, 0, 1);
     platformGrid->addWidget(customSettingsButton_, 0, 2);
@@ -99,7 +89,6 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     log_->setReadOnly(true);
     log_->setMinimumHeight(70);
     log_->setMaximumHeight(110);
-    log_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     main->addWidget(log_);
 
     connect(youtube_.start, &QPushButton::clicked, this, &TihiyMultistreamDock::startYouTube);
@@ -110,7 +99,6 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     connect(custom_.stop, &QPushButton::clicked, this, &TihiyMultistreamDock::stopCustom);
     connect(startAllButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::startAll);
     connect(stopAllButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::stopAll);
-
     connect(applyRecommendedButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::applyRecommendedSettings);
     connect(saveSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::saveSettingsClicked);
     connect(youtubeSettingsButton_, &QPushButton::clicked, this, &TihiyMultistreamDock::openYouTubeSettings);
@@ -122,7 +110,7 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     setTargetState(twitch_, "READY", "idle");
     setTargetState(custom_, "READY", "idle");
     updateGlobalState();
-    appendLog("Compact scalable panel ready. Twitch 2K modes use OBS native Multitrack Video when available.");
+    appendLog("Panel ready. Twitch 2K uses OBS native Multitrack Video; Vertical uses Aitum Vertical canvas.");
 }
 
 TihiyMultistreamDock::~TihiyMultistreamDock()
@@ -140,31 +128,24 @@ QDialog *TihiyMultistreamDock::makeTargetDialog(const QString &title, TihiyTarge
     auto *dialog = new QDialog(this);
     dialog->setWindowTitle(title + " settings");
     dialog->setMinimumWidth(420);
-
     auto *outer = new QVBoxLayout(dialog);
     outer->setContentsMargins(10, 10, 10, 10);
     outer->setSpacing(8);
-
-    auto *label = new QLabel("<b>" + title + "</b>");
-    outer->addWidget(label);
+    outer->addWidget(new QLabel("<b>" + title + "</b>"));
 
     auto *layout = new QFormLayout();
     layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-
     ui.enabled = new QCheckBox("Enabled");
     ui.enabled->setChecked(title != "Custom RTMP");
-
     ui.server = new QLineEdit(server);
     ui.key = new QLineEdit();
     ui.key->setEchoMode(QLineEdit::Password);
     ui.key->setPlaceholderText("Stream key");
-
     ui.width = new QSpinBox(); ui.width->setRange(320, 7680); ui.width->setValue(width);
     ui.height = new QSpinBox(); ui.height->setRange(240, 4320); ui.height->setValue(height);
     ui.fps = new QSpinBox(); ui.fps->setRange(24, 120); ui.fps->setValue(fps);
     ui.videoBitrate = new QSpinBox(); ui.videoBitrate->setRange(500, 100000); ui.videoBitrate->setValue(vbr);
     ui.audioBitrate = new QSpinBox(); ui.audioBitrate->setRange(64, 320); ui.audioBitrate->setValue(abr);
-
     layout->addRow(ui.enabled);
     layout->addRow("Server", ui.server);
     layout->addRow("Stream key", ui.key);
@@ -179,25 +160,21 @@ QDialog *TihiyMultistreamDock::makeTargetDialog(const QString &title, TihiyTarge
     ui.status->setAlignment(Qt::AlignCenter);
     ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px;");
     outer->addWidget(ui.status);
-
     auto *rowButtons = new QHBoxLayout();
     ui.start = makeBigButton("Start");
     ui.stop = makeBigButton("Stop");
     rowButtons->addWidget(ui.start);
     rowButtons->addWidget(ui.stop);
     outer->addLayout(rowButtons);
-
     auto *closeButtons = new QDialogButtonBox(QDialogButtonBox::Close);
     connect(closeButtons, &QDialogButtonBox::rejected, dialog, &QDialog::hide);
     outer->addWidget(closeButtons);
-
     return dialog;
 }
 
 void TihiyMultistreamDock::showTargetDialog(QDialog *dialog)
 {
-    if (!dialog)
-        return;
+    if (!dialog) return;
     dialog->show();
     dialog->raise();
     dialog->activateWindow();
@@ -210,51 +187,34 @@ void TihiyMultistreamDock::openCustomSettings() { showTargetDialog(customDialog_
 void TihiyMultistreamDock::appendLog(const QString &message)
 {
     const QString line = QDateTime::currentDateTime().toString("HH:mm:ss") + "  " + message;
-    if (log_)
-        log_->append(line);
+    if (log_) log_->append(line);
     blog(LOG_INFO, "[TiHiY MultiStream Pro] %s", line.toUtf8().constData());
 }
 
 void TihiyMultistreamDock::setTargetState(TihiyTargetUi &ui, const QString &stateText, const QString &styleState)
 {
-    if (!ui.start || !ui.stop || !ui.status)
-        return;
-
+    if (!ui.start || !ui.stop || !ui.status) return;
     if (styleState == "starting") {
-        ui.start->setText("Starting...");
-        ui.start->setEnabled(false);
-        ui.stop->setEnabled(true);
+        ui.start->setText("Starting..."); ui.start->setEnabled(false); ui.stop->setEnabled(true);
         ui.start->setStyleSheet("font-weight: bold; background-color: #9a6a00; color: white;");
-        ui.status->setText(stateText);
-        ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #9a6a00; color: white;");
+        ui.status->setText(stateText); ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #9a6a00; color: white;");
     } else if (styleState == "live") {
-        ui.start->setText("LIVE");
-        ui.start->setEnabled(false);
-        ui.stop->setEnabled(true);
+        ui.start->setText("LIVE"); ui.start->setEnabled(false); ui.stop->setEnabled(true);
         ui.start->setStyleSheet("font-weight: bold; background-color: #188038; color: white;");
-        ui.status->setText(stateText);
-        ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #188038; color: white;");
+        ui.status->setText(stateText); ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #188038; color: white;");
     } else if (styleState == "error") {
-        ui.start->setText("Start");
-        ui.start->setEnabled(true);
-        ui.stop->setEnabled(false);
+        ui.start->setText("Start"); ui.start->setEnabled(true); ui.stop->setEnabled(false);
         ui.start->setStyleSheet("font-weight: bold; background-color: #b3261e; color: white;");
-        ui.status->setText(stateText);
-        ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #b3261e; color: white;");
+        ui.status->setText(stateText); ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px; background-color: #b3261e; color: white;");
     } else {
-        ui.start->setText("Start");
-        ui.start->setEnabled(true);
-        ui.stop->setEnabled(false);
-        ui.start->setStyleSheet("");
-        ui.status->setText(stateText);
-        ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px;");
+        ui.start->setText("Start"); ui.start->setEnabled(true); ui.stop->setEnabled(false); ui.start->setStyleSheet("");
+        ui.status->setText(stateText); ui.status->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px;");
     }
 }
 
 void TihiyMultistreamDock::updateGlobalState()
 {
     const bool anyLive = youtubeOut_.output || customOut_.output || twitchOut_.output || twitchFrontendActive_;
-
     if (globalStatus_) {
         if (anyLive) {
             QStringList live;
@@ -268,72 +228,32 @@ void TihiyMultistreamDock::updateGlobalState()
             globalStatus_->setStyleSheet("font-weight: bold; padding: 4px; border-radius: 4px;");
         }
     }
-
     if (startAllButton_) {
         startAllButton_->setText(anyLive ? "LIVE ACTIVE" : "Start All");
         startAllButton_->setEnabled(!anyLive);
         startAllButton_->setStyleSheet(anyLive ? "font-weight: bold; background-color: #188038; color: white;" : "");
     }
-
-    if (stopAllButton_)
-        stopAllButton_->setEnabled(anyLive);
+    if (stopAllButton_) stopAllButton_->setEnabled(anyLive);
 }
 
 bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle)
 {
-    if (!ui.enabled->isChecked()) {
-        setTargetState(ui, "DISABLED", "error");
-        updateGlobalState();
-        appendLog(name + ": skipped, not enabled.");
-        return false;
-    }
-
-    if (ui.server->text().trimmed().isEmpty() || ui.key->text().trimmed().isEmpty()) {
-        setTargetState(ui, "MISSING SERVER / KEY", "error");
-        updateGlobalState();
-        appendLog(name + ": server/key is empty.");
-        return false;
-    }
-
-    if (handle.output) {
-        setTargetState(ui, "LIVE", "live");
-        updateGlobalState();
-        appendLog(name + ": already active. Stop first.");
-        return false;
-    }
+    if (!ui.enabled->isChecked()) { setTargetState(ui, "DISABLED", "error"); updateGlobalState(); appendLog(name + ": skipped, not enabled."); return false; }
+    if (ui.server->text().trimmed().isEmpty() || ui.key->text().trimmed().isEmpty()) { setTargetState(ui, "MISSING SERVER / KEY", "error"); updateGlobalState(); appendLog(name + ": server/key is empty."); return false; }
+    if (handle.output) { setTargetState(ui, "LIVE", "live"); updateGlobalState(); appendLog(name + ": already active. Stop first."); return false; }
 
     setTargetState(ui, "STARTING...", "starting");
     updateGlobalState();
-
     obs_data_t *serviceSettings = obs_data_create();
     obs_data_set_string(serviceSettings, "server", ui.server->text().toUtf8().constData());
     obs_data_set_string(serviceSettings, "key", ui.key->text().toUtf8().constData());
     handle.service = obs_service_create(SERVICE_ID, name.toUtf8().constData(), serviceSettings, nullptr);
     obs_data_release(serviceSettings);
 
-    int twitchMode = 0;
-    if (name == "Twitch" && twitchMode_)
-        twitchMode = twitchMode_->currentIndex();
-
     if (name == "Twitch") {
-        if (twitchMode == 1 || twitchMode == 2) {
-            ui.width->setValue(2560);
-            ui.height->setValue(1440);
-            ui.fps->setValue(60);
-            ui.videoBitrate->setValue(9000);
-            appendLog(twitchMode == 1
-                ? "Twitch 2K fallback profile: 2560x1440@60, 9 Mbps."
-                : "Twitch 2K + Vertical fallback profile: 2560x1440@60 + 1080x1920 canvas.");
-        } else {
-            ui.width->setValue(1920);
-            ui.height->setValue(1080);
-            ui.fps->setValue(60);
-            ui.videoBitrate->setValue(7500);
-            appendLog("Twitch HD profile: 1920x1080@60, 7.5 Mbps.");
-        }
+        ui.width->setValue(1920); ui.height->setValue(1080); ui.fps->setValue(60); ui.videoBitrate->setValue(7500);
+        appendLog("Twitch HD profile: 1920x1080@60, 7.5 Mbps.");
     }
-
-    const char *videoEncoderId = VIDEO_ENCODER_ID_NVENC;
 
     obs_data_t *vSettings = obs_data_create();
     obs_data_set_int(vSettings, "bitrate", ui.videoBitrate->value());
@@ -346,68 +266,42 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     obs_data_set_bool(vSettings, "lookahead", false);
     obs_data_set_bool(vSettings, "psycho_aq", true);
     obs_data_set_int(vSettings, "bframes", 2);
-
-    handle.video = obs_video_encoder_create(videoEncoderId, (name + " Video").toUtf8().constData(), vSettings, nullptr);
+    handle.video = obs_video_encoder_create(VIDEO_ENCODER_ID_NVENC, (name + " Video").toUtf8().constData(), vSettings, nullptr);
     obs_data_release(vSettings);
 
     obs_data_t *aSettings = obs_data_create();
     obs_data_set_int(aSettings, "bitrate", ui.audioBitrate->value());
     handle.audio = obs_audio_encoder_create(AUDIO_ENCODER_ID, (name + " Audio").toUtf8().constData(), aSettings, 0, nullptr);
     obs_data_release(aSettings);
-
     handle.output = obs_output_create(OUTPUT_ID, (name + " Output").toUtf8().constData(), nullptr, nullptr);
 
     if (!handle.service || !handle.video || !handle.audio || !handle.output) {
-        appendLog(name + ": failed to create OBS output/encoder/service.");
-        releaseTarget(handle);
-        setTargetState(ui, "CREATE FAILED", "error");
-        updateGlobalState();
-        return false;
+        appendLog(name + ": failed to create OBS output/encoder/service."); releaseTarget(handle); setTargetState(ui, "CREATE FAILED", "error"); updateGlobalState(); return false;
     }
-
     obs_encoder_set_video(handle.video, obs_get_video());
     obs_encoder_set_audio(handle.audio, obs_get_audio());
     obs_encoder_set_scaled_size(handle.video, ui.width->value(), ui.height->value());
-
     obs_output_set_service(handle.output, handle.service);
     obs_output_set_video_encoder(handle.output, handle.video);
     obs_output_set_audio_encoder(handle.output, handle.audio, 0);
 
     if (!obs_output_start(handle.output)) {
         const char *error = obs_output_get_last_error(handle.output);
-        appendLog(name + ": start failed: " + QString(error ? error : "unknown error"));
-        releaseTarget(handle);
-        setTargetState(ui, "START FAILED", "error");
-        updateGlobalState();
-        return false;
+        appendLog(name + ": start failed: " + QString(error ? error : "unknown error")); releaseTarget(handle); setTargetState(ui, "START FAILED", "error"); updateGlobalState(); return false;
     }
-
-    setTargetState(ui, "LIVE", "live");
-    updateGlobalState();
-    appendLog(name + ": started " + QString::number(ui.width->value()) + "x" + QString::number(ui.height->value()) +
-              " @ " + QString::number(ui.videoBitrate->value()) + " Kbps");
+    setTargetState(ui, "LIVE", "live"); updateGlobalState();
+    appendLog(name + ": started " + QString::number(ui.width->value()) + "x" + QString::number(ui.height->value()) + " @ " + QString::number(ui.videoBitrate->value()) + " Kbps");
     return true;
 }
 
 bool TihiyMultistreamDock::startTwitchEnhanced()
 {
-    if (!twitch_.enabled->isChecked()) {
-        setTargetState(twitch_, "DISABLED", "error");
-        return false;
-    }
+    if (!twitch_.enabled->isChecked()) { setTargetState(twitch_, "DISABLED", "error"); return false; }
+    if (twitch_.key->text().trimmed().isEmpty()) { setTargetState(twitch_, "MISSING STREAM KEY", "error"); appendLog("Twitch: stream key is empty."); return false; }
+    if (obs_frontend_streaming_active() || twitchFrontendActive_) { setTargetState(twitch_, "LIVE", "live"); updateGlobalState(); return false; }
 
-    if (twitch_.key->text().trimmed().isEmpty()) {
-        setTargetState(twitch_, "MISSING STREAM KEY", "error");
-        appendLog("Twitch: stream key is empty.");
-        return false;
-    }
-
-    if (obs_frontend_streaming_active() || twitchFrontendActive_) {
-        setTargetState(twitch_, "LIVE", "live");
-        appendLog("Twitch: native OBS streaming is already active.");
-        updateGlobalState();
-        return false;
-    }
+    const int mode = twitchMode_ ? twitchMode_->currentIndex() : 1;
+    if (mode < 1) return startTarget("Twitch", twitch_, twitchOut_);
 
     const QString obsVersion = QString::fromUtf8(obs_get_version_string());
     if (obs_get_version() < 0x2000000) {
@@ -416,24 +310,20 @@ bool TihiyMultistreamDock::startTwitchEnhanced()
         return false;
     }
 
-    const int mode = twitchMode_ ? twitchMode_->currentIndex() : 1;
-    if (mode < 1)
-        return startTarget("Twitch", twitch_, twitchOut_);
-
+    obs_canvas_t *vertical = nullptr;
     if (mode == 2) {
-        obs_canvas_t *vertical = obs_get_canvas_by_name("Aitum Vertical");
-        if (!vertical)
-            vertical = obs_get_canvas_by_name("Vertical");
+        vertical = obs_get_canvas_by_name("Aitum Vertical");
+        if (!vertical) vertical = obs_get_canvas_by_name("Vertical");
         if (!vertical) {
             setTargetState(twitch_, "Aitum Vertical REQUIRED", "error");
-            appendLog("Twitch 2K + Vertical: Aitum Vertical canvas was not found. Install the current Aitum Vertical plugin, create its vertical canvas, then restart OBS.");
+            appendLog("Twitch 2K + Vertical: Aitum Vertical canvas was not found. Install the current Aitum Vertical plugin and restart OBS.");
             return false;
         }
-        obs_canvas_release(vertical);
     }
 
     config_t *profile = obs_frontend_get_profile_config();
     if (!profile) {
+        if (vertical) obs_canvas_release(vertical);
         setTargetState(twitch_, "PROFILE CONFIG FAILED", "error");
         appendLog("Twitch 2K: unable to access OBS profile configuration.");
         return false;
@@ -443,20 +333,18 @@ bool TihiyMultistreamDock::startTwitchEnhanced()
     config_set_bool(profile, "Stream1", "MultitrackVideoMaximumAggregateBitrateAuto", true);
     config_set_bool(profile, "Stream1", "MultitrackVideoMaximumVideoTracksAuto", false);
     config_set_int(profile, "Stream1", "MultitrackVideoMaximumVideoTracks", mode == 2 ? 5 : 4);
-
-    if (mode == 2) {
-        obs_canvas_t *vertical = obs_get_canvas_by_name("Aitum Vertical");
-        if (!vertical)
-            vertical = obs_get_canvas_by_name("Vertical");
-        if (vertical) {
-            config_set_string(profile, "Stream1", "MultitrackExtraCanvas", obs_canvas_get_uuid(vertical));
-            obs_canvas_release(vertical);
-        }
+    if (vertical) {
+        config_set_string(profile, "Stream1", "MultitrackExtraCanvas", obs_canvas_get_uuid(vertical));
+        obs_canvas_release(vertical);
     } else {
         config_remove_value(profile, "Stream1", "MultitrackExtraCanvas");
     }
+    config_save(profile);
 
-    config_save_safe(profile, "tmp", nullptr);
+    twitch_.width->setValue(2560);
+    twitch_.height->setValue(1440);
+    twitch_.fps->setValue(60);
+    twitch_.videoBitrate->setValue(9000);
 
     obs_data_t *settings = obs_data_create();
     obs_data_set_string(settings, "service", "Twitch");
@@ -464,7 +352,6 @@ bool TihiyMultistreamDock::startTwitchEnhanced()
     obs_data_set_string(settings, "key", twitch_.key->text().toUtf8().constData());
     obs_data_set_bool(settings, "using_custom_server", false);
     obs_data_set_bool(settings, "bwtest", false);
-
     obs_service_t *service = obs_service_create(SERVICE_ID, "TiHiY Twitch Enhanced", settings, nullptr);
     obs_data_release(settings);
 
@@ -474,38 +361,24 @@ bool TihiyMultistreamDock::startTwitchEnhanced()
         return false;
     }
 
-    twitch_.width->setValue(2560);
-    twitch_.height->setValue(1440);
-    twitch_.fps->setValue(60);
-    twitch_.videoBitrate->setValue(9000);
-
     obs_frontend_set_streaming_service(service);
     obs_frontend_save_streaming_service();
     obs_service_release(service);
-
     setTargetState(twitch_, "STARTING...", "starting");
     updateGlobalState();
-
-    appendLog(mode == 1
-        ? "Twitch 2K: enabling OBS native Multitrack Video, max 4 video tracks, aggregate bandwidth Auto."
-        : "Twitch 2K + Vertical: enabling OBS native Multitrack Video, 5 video tracks, Aitum Vertical as additional canvas.");
-
+    appendLog(mode == 1 ? "Twitch 2K: native Multitrack Video enabled; max 4 video tracks; aggregate bandwidth Auto." : "Twitch 2K + Vertical: native Multitrack Video enabled; max 5 video tracks; Aitum Vertical selected.");
     obs_frontend_streaming_start();
     twitchFrontendActive_ = true;
     setTargetState(twitch_, "LIVE / START REQUESTED", "live");
     updateGlobalState();
-    appendLog("Twitch native streaming start requested. OBS/Twitch now owns the Enhanced Broadcasting session.");
+    appendLog("Twitch native streaming start requested.");
     return true;
 }
 
 void TihiyMultistreamDock::stopTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle)
 {
-    if (handle.output) {
-        obs_output_stop(handle.output);
-        appendLog(name + ": stop requested.");
-    } else {
-        appendLog(name + ": already stopped.");
-    }
+    if (handle.output) { obs_output_stop(handle.output); appendLog(name + ": stop requested."); }
+    else appendLog(name + ": already stopped.");
     releaseTarget(handle);
     setTargetState(ui, "STOPPED", "idle");
     updateGlobalState();
@@ -513,10 +386,7 @@ void TihiyMultistreamDock::stopTarget(const QString &name, TihiyTargetUi &ui, Ti
 
 void TihiyMultistreamDock::stopTwitchEnhanced()
 {
-    if (obs_frontend_streaming_active()) {
-        obs_frontend_streaming_stop();
-        appendLog("Twitch: native OBS streaming stop requested.");
-    }
+    if (obs_frontend_streaming_active()) { obs_frontend_streaming_stop(); appendLog("Twitch: native OBS streaming stop requested."); }
     twitchFrontendActive_ = false;
     setTargetState(twitch_, "STOPPED", "idle");
     updateGlobalState();
@@ -526,29 +396,21 @@ void TihiyMultistreamDock::releaseTarget(TihiyOutputHandle &handle)
 {
     if (handle.output) { obs_output_release(handle.output); handle.output = nullptr; }
     if (handle.video) { obs_encoder_release(handle.video); handle.video = nullptr; }
-    if (handle.audio) { obs_audio_encoder_release(handle.audio); handle.audio = nullptr; }
+    if (handle.audio) { obs_encoder_release(handle.audio); handle.audio = nullptr; }
     if (handle.service) { obs_service_release(handle.service); handle.service = nullptr; }
 }
 
 static void setTargetValues(TihiyTargetUi &ui, const QString &server, int width, int height, int fps, int vbr, int abr)
 {
-    ui.server->setText(server);
-    ui.width->setValue(width);
-    ui.height->setValue(height);
-    ui.fps->setValue(fps);
-    ui.videoBitrate->setValue(vbr);
-    ui.audioBitrate->setValue(abr);
+    ui.server->setText(server); ui.width->setValue(width); ui.height->setValue(height); ui.fps->setValue(fps); ui.videoBitrate->setValue(vbr); ui.audioBitrate->setValue(abr);
 }
 
 void TihiyMultistreamDock::applyRecommendedSettings()
 {
-    youtube_.enabled->setChecked(true);
-    twitch_.enabled->setChecked(true);
-    custom_.enabled->setChecked(false);
+    youtube_.enabled->setChecked(true); twitch_.enabled->setChecked(true); custom_.enabled->setChecked(false);
     setTargetValues(youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160);
     setTargetValues(twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 7500, 160);
-    if (twitchMode_)
-        twitchMode_->setCurrentIndex(0);
+    if (twitchMode_) twitchMode_->setCurrentIndex(0);
     appendLog("Recommended preset applied: YouTube 2K60 + Twitch HD 1080p60.");
 }
 
@@ -571,11 +433,8 @@ void TihiyMultistreamDock::saveSettings()
         s.setValue(prefix + "/vbr", ui.videoBitrate->value());
         s.setValue(prefix + "/abr", ui.audioBitrate->value());
     };
-    saveTarget("youtube", youtube_);
-    saveTarget("twitch", twitch_);
-    saveTarget("custom", custom_);
-    if (twitchMode_)
-        s.setValue("twitchMode", twitchMode_->currentIndex());
+    saveTarget("youtube", youtube_); saveTarget("twitch", twitch_); saveTarget("custom", custom_);
+    if (twitchMode_) s.setValue("twitchMode", twitchMode_->currentIndex());
 }
 
 void TihiyMultistreamDock::loadSettings()
@@ -591,68 +450,48 @@ void TihiyMultistreamDock::loadSettings()
         ui.videoBitrate->setValue(s.value(prefix + "/vbr", ui.videoBitrate->value()).toInt());
         ui.audioBitrate->setValue(s.value(prefix + "/abr", ui.audioBitrate->value()).toInt());
     };
-    loadTarget("youtube", youtube_);
-    loadTarget("twitch", twitch_);
-    loadTarget("custom", custom_);
-    if (twitchMode_)
-        twitchMode_->setCurrentIndex(s.value("twitchMode", 0).toInt());
+    loadTarget("youtube", youtube_); loadTarget("twitch", twitch_); loadTarget("custom", custom_);
+    if (twitchMode_) twitchMode_->setCurrentIndex(s.value("twitchMode", 0).toInt());
 }
 
 void TihiyMultistreamDock::startYouTube() { startTarget("YouTube", youtube_, youtubeOut_); }
 void TihiyMultistreamDock::startTwitch()
 {
     const int mode = twitchMode_ ? twitchMode_->currentIndex() : 0;
-    if (mode > 0)
-        startTwitchEnhanced();
-    else
-        startTarget("Twitch", twitch_, twitchOut_);
+    if (mode > 0) startTwitchEnhanced();
+    else startTarget("Twitch", twitch_, twitchOut_);
 }
 void TihiyMultistreamDock::startCustom() { startTarget("Custom", custom_, customOut_); }
 
 void TihiyMultistreamDock::startAll()
 {
     saveSettings();
-    if (startAllButton_) {
-        startAllButton_->setText("STARTING...");
-        startAllButton_->setEnabled(false);
-        startAllButton_->setStyleSheet("font-weight: bold; background-color: #9a6a00; color: white;");
-    }
+    if (startAllButton_) { startAllButton_->setText("STARTING..."); startAllButton_->setEnabled(false); startAllButton_->setStyleSheet("font-weight: bold; background-color: #9a6a00; color: white;"); }
     appendLog("Start All requested. Starting enabled outputs in safe order...");
-
     bool startedAny = false;
-
-    if (youtube_.enabled->isChecked())
-        startedAny = startTarget("YouTube", youtube_, youtubeOut_) || startedAny;
-
-    if (twitch_.enabled->isChecked())
-        startedAny = startTwitch() , true || startedAny;
-
-    if (custom_.enabled->isChecked())
-        startedAny = startTarget("Custom", custom_, customOut_) || startedAny;
-
-    if (!startedAny)
-        appendLog("Start All: no enabled output started. Check Enabled flags, server and stream keys.");
-
+    if (youtube_.enabled->isChecked()) startedAny = startTarget("YouTube", youtube_, youtubeOut_) || startedAny;
+    if (twitch_.enabled->isChecked()) {
+        const int mode = twitchMode_ ? twitchMode_->currentIndex() : 0;
+        if (mode > 0) startedAny = startTwitchEnhanced() || startedAny;
+        else startedAny = startTarget("Twitch", twitch_, twitchOut_) || startedAny;
+    }
+    if (custom_.enabled->isChecked()) startedAny = startTarget("Custom", custom_, customOut_) || startedAny;
+    if (!startedAny) appendLog("Start All: no enabled output started. Check Enabled flags, server and stream keys.");
     updateGlobalState();
 }
 
 void TihiyMultistreamDock::stopYouTube() { stopTarget("YouTube", youtube_, youtubeOut_); }
 void TihiyMultistreamDock::stopTwitch()
 {
-    if (twitchFrontendActive_ || (twitchMode_ && twitchMode_->currentIndex() > 0))
-        stopTwitchEnhanced();
-    else
-        stopTarget("Twitch", twitch_, twitchOut_);
+    if (twitchFrontendActive_) stopTwitchEnhanced();
+    else stopTarget("Twitch", twitch_, twitchOut_);
 }
 void TihiyMultistreamDock::stopCustom() { stopTarget("Custom", custom_, customOut_); }
 
 void TihiyMultistreamDock::stopAll()
 {
     stopYouTube();
-    if (twitchFrontendActive_)
-        stopTwitchEnhanced();
-    else
-        stopTarget("Twitch", twitch_, twitchOut_);
+    if (twitchFrontendActive_) stopTwitchEnhanced(); else stopTarget("Twitch", twitch_, twitchOut_);
     stopCustom();
     updateGlobalState();
 }
