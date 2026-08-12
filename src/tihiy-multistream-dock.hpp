@@ -8,6 +8,7 @@
 #include <QTextEdit>
 #include <QDialog>
 #include <QLabel>
+#include <QComboBox>
 #include <QString>
 
 #include <obs.hpp>
@@ -64,7 +65,7 @@ private:
     TihiyOutputHandle customOut_;
 
     QTextEdit *log_ = nullptr;
-    QCheckBox *twitchSafeCpu_ = nullptr;
+    QComboBox *twitchMode_ = nullptr;
     QLabel *globalStatus_ = nullptr;
     QPushButton *startAllButton_ = nullptr;
     QPushButton *stopAllButton_ = nullptr;

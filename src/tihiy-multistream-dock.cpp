@@ -38,7 +38,16 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     main->addWidget(title);
 
     youtubeDialog_ = makeTargetDialog("YouTube 2K60", youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160);
-    twitchDialog_ = makeTargetDialog("Twitch 1080p60", twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160);
+    twitchDialog_ = makeTargetDialog("Twitch", twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 7500, 160);
+
+    twitchMode_ = new QComboBox();
+    twitchMode_->addItem("HD 1080p60");
+    twitchMode_->addItem("2K 1440p60");
+    twitchMode_->addItem("2K 1440p60 + Vertical");
+    twitchMode_->setCurrentIndex(0);
+    twitchMode_->setToolTip("Twitch mode. 2K requires OBS 32+ and Twitch Enhanced Broadcasting. Vertical requires Aitum Vertical.");
+    main->addWidget(new QLabel("<b>Twitch mode</b>"));
+    main->addWidget(twitchMode_);
     customDialog_ = makeTargetDialog("Custom RTMP", custom_, "", 1920, 1080, 60, 8000, 160);
 
     globalStatus_ = new QLabel("Status: IDLE");
@@ -68,7 +77,7 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     twitchSettingsButton_->setToolTip("Open Twitch stream settings.");
     customSettingsButton_->setToolTip("Open custom RTMP settings.");
     saveSettingsButton_->setToolTip("Save servers, stream keys, bitrate and enabled flags.");
-    applyRecommendedButton_->setToolTip("Apply YouTube 2K60 + Twitch 1080p60 recommended preset.");
+    applyRecommendedButton_->setToolTip("Apply YouTube 2K60 + Twitch HD recommended preset.");
 
     platformGrid->addWidget(youtubeSettingsButton_, 0, 0);
     platformGrid->addWidget(twitchSettingsButton_, 0, 1);
@@ -79,11 +88,6 @@ TihiyMultistreamDock::TihiyMultistreamDock(QWidget *parent) : QWidget(parent)
     platformGrid->setColumnStretch(1, 1);
     platformGrid->setColumnStretch(2, 1);
     main->addLayout(platformGrid);
-
-    twitchSafeCpu_ = new QCheckBox("Twitch safe 1080 fix");
-    twitchSafeCpu_->setToolTip("Stable Twitch 1080p mode when OBS canvas is 2560x1440.");
-    twitchSafeCpu_->setChecked(true);
-    main->addWidget(twitchSafeCpu_);
 
     auto *hint = new QLabel("Click YouTube / Twitch / Custom to open platform settings.");
     hint->setWordWrap(true);
@@ -306,8 +310,29 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     handle.service = obs_service_create(SERVICE_ID, name.toUtf8().constData(), serviceSettings, nullptr);
     obs_data_release(serviceSettings);
 
-    const bool twitchSafe = (name == "Twitch" && twitchSafeCpu_ && twitchSafeCpu_->isChecked());
-    const char *videoEncoderId = twitchSafe ? VIDEO_ENCODER_ID_X264 : VIDEO_ENCODER_ID_NVENC;
+    int twitchMode = 0;
+    if (name == "Twitch" && twitchMode_)
+        twitchMode = twitchMode_->currentIndex();
+
+    if (name == "Twitch") {
+        if (twitchMode == 1 || twitchMode == 2) {
+            ui.width->setValue(2560);
+            ui.height->setValue(1440);
+            ui.fps->setValue(60);
+            ui.videoBitrate->setValue(9000);
+            appendLog(twitchMode == 1
+                ? "Twitch 2K profile: 2560x1440@60, 9 Mbps. Enhanced Broadcasting must be enabled in OBS."
+                : "Twitch 2K + Vertical profile: 2560x1440@60 + 1080x1920 vertical canvas. Enhanced Broadcasting + Aitum Vertical required.");
+        } else {
+            ui.width->setValue(1920);
+            ui.height->setValue(1080);
+            ui.fps->setValue(60);
+            ui.videoBitrate->setValue(7500);
+            appendLog("Twitch HD profile: 1920x1080@60, 7.5 Mbps.");
+        }
+    }
+
+    const char *videoEncoderId = VIDEO_ENCODER_ID_NVENC;
 
     obs_data_t *vSettings = obs_data_create();
     obs_data_set_int(vSettings, "bitrate", ui.videoBitrate->value());
@@ -315,17 +340,12 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     obs_data_set_int(vSettings, "keyint_sec", 2);
     obs_data_set_string(vSettings, "profile", "high");
 
-    if (twitchSafe) {
-        obs_data_set_string(vSettings, "preset", "veryfast");
-        appendLog(name + ": Twitch safe 1080 fix enabled, using x264 fallback for scaled 1080p output.");
-    } else {
-        obs_data_set_string(vSettings, "preset", "p5");
-        obs_data_set_string(vSettings, "tuning", "hq");
-        obs_data_set_string(vSettings, "multipass", "qres");
-        obs_data_set_bool(vSettings, "lookahead", false);
-        obs_data_set_bool(vSettings, "psycho_aq", true);
-        obs_data_set_int(vSettings, "bframes", 2);
-    }
+    obs_data_set_string(vSettings, "preset", "p5");
+    obs_data_set_string(vSettings, "tuning", "hq");
+    obs_data_set_string(vSettings, "multipass", "qres");
+    obs_data_set_bool(vSettings, "lookahead", false);
+    obs_data_set_bool(vSettings, "psycho_aq", true);
+    obs_data_set_int(vSettings, "bframes", 2);
 
     handle.video = obs_video_encoder_create(videoEncoderId, (name + " Video").toUtf8().constData(), vSettings, nullptr);
     obs_data_release(vSettings);
@@ -334,6 +354,17 @@ bool TihiyMultistreamDock::startTarget(const QString &name, TihiyTargetUi &ui, T
     obs_data_set_int(aSettings, "bitrate", ui.audioBitrate->value());
     handle.audio = obs_audio_encoder_create(AUDIO_ENCODER_ID, (name + " Audio").toUtf8().constData(), aSettings, 0, nullptr);
     obs_data_release(aSettings);
+
+    if (name == "Twitch" && twitchMode > 0) {
+        if (twitchMode == 2 && !obs_get_module("vertical-canvas")) {
+            setTargetState(ui, "Aitum Vertical required", "error");
+            appendLog("Twitch 2K + Vertical: Aitum Vertical is not detected. Install Aitum Vertical 1.6.4+.");
+            releaseTarget(handle);
+            updateGlobalState();
+            return false;
+        }
+        appendLog("Twitch 2K modes require OBS Enhanced Broadcasting (Multitrack Video). The profile is prepared by TiHiY MultiStream Pro; the OBS/Twitch service must provide the multitrack path.");
+    }
 
     handle.output = obs_output_create(OUTPUT_ID, (name + " Output").toUtf8().constData(), nullptr, nullptr);
 
@@ -406,10 +437,10 @@ void TihiyMultistreamDock::applyRecommendedSettings()
     twitch_.enabled->setChecked(true);
     custom_.enabled->setChecked(false);
     setTargetValues(youtube_, "rtmps://a.rtmps.youtube.com/live2", 2560, 1440, 60, 24000, 160);
-    setTargetValues(twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 6000, 160);
-    if (twitchSafeCpu_)
-        twitchSafeCpu_->setChecked(true);
-    appendLog("Recommended preset applied: YouTube 2K60 + Twitch 1080p60 safe mode.");
+    setTargetValues(twitch_, "rtmp://live.twitch.tv/app", 1920, 1080, 60, 7500, 160);
+    if (twitchMode_)
+        twitchMode_->setCurrentIndex(0);
+    appendLog("Recommended preset applied: YouTube 2K60 + Twitch HD 1080p60.");
 }
 
 void TihiyMultistreamDock::saveSettingsClicked()
@@ -434,8 +465,8 @@ void TihiyMultistreamDock::saveSettings()
     saveTarget("youtube", youtube_);
     saveTarget("twitch", twitch_);
     saveTarget("custom", custom_);
-    if (twitchSafeCpu_)
-        s.setValue("twitchSafeCpu", twitchSafeCpu_->isChecked());
+    if (twitchMode_)
+        s.setValue("twitchMode", twitchMode_->currentIndex());
 }
 
 void TihiyMultistreamDock::loadSettings()
@@ -454,8 +485,8 @@ void TihiyMultistreamDock::loadSettings()
     loadTarget("youtube", youtube_);
     loadTarget("twitch", twitch_);
     loadTarget("custom", custom_);
-    if (twitchSafeCpu_)
-        twitchSafeCpu_->setChecked(s.value("twitchSafeCpu", true).toBool());
+    if (twitchMode_)
+        twitchMode_->setCurrentIndex(s.value("twitchMode", 0).toInt());
 }
 
 void TihiyMultistreamDock::startYouTube() { startTarget("YouTube", youtube_, youtubeOut_); }
