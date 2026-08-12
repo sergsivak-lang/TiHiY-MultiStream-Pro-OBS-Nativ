@@ -79,6 +79,8 @@ private:
     QDialog *twitchDialog_ = nullptr;
     QDialog *customDialog_ = nullptr;
 
+    bool twitchFrontendActive_ = false;
+
     QDialog *makeTargetDialog(const QString &title, TihiyTargetUi &ui,
                               const QString &server, int width, int height, int fps,
                               int vbr, int abr);
@@ -86,7 +88,9 @@ private:
     void showTargetDialog(QDialog *dialog);
     void appendLog(const QString &message);
     bool startTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle);
+    bool startTwitchEnhanced();
     void stopTarget(const QString &name, TihiyTargetUi &ui, TihiyOutputHandle &handle);
+    void stopTwitchEnhanced();
     void releaseTarget(TihiyOutputHandle &handle);
     void loadSettings();
     void saveSettings();
